@@ -1,0 +1,29 @@
+README.md
+  s_c5df812bec116e::t_8cef9a99c8f9fd 1,8,17,47,80,126,165
+package.json
+  s_c5df812bec116e::t_8cef9a99c8f9fd 2
+example/convex/http.ts
+  s_c5df812bec116e::t_8cef9a99c8f9fd 3
+example/convex/agentphoneSetup.ts
+  s_c5df812bec116e::t_8cef9a99c8f9fd 3
+example/convex/convex.config.ts
+  s_c5df812bec116e::t_8cef9a99c8f9fd 3
+example/package.json
+  s_c5df812bec116e::t_8cef9a99c8f9fd 10
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.3",
+  "base_commit_sha": "3dde9e3f0c0d7d62de4d242f67b681489fbb31d4",
+  "prompts": {},
+  "sessions": {
+    "s_c5df812bec116e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e9efb-6716-73a3-a672-ea934e33993f",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Evan Taylor <eltaylor1104@gmail.com>"
+    }
+  }
+}
