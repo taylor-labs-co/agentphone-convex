@@ -1,0 +1,65 @@
+{
+  "name": "agentphone-convex",
+  "version": "0.1.0",
+  "description": "Convex component for AgentPhone agents, numbers, calls, conversations, and webhooks.",
+  "type": "module",
+  "license": "MIT",
+  "private": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taylor-labs-co/agentphone-convex.git"
+  },
+  "bugs": {
+    "url": "https://github.com/taylor-labs-co/agentphone-convex/issues"
+  },
+  "homepage": "https://github.com/taylor-labs-co/agentphone-convex#readme",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "files": [
+    "dist",
+    "example",
+    "README.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/client/index.d.ts",
+      "import": "./dist/client/index.js"
+    },
+    "./convex.config.js": {
+      "types": "./dist/component/convex.config.d.ts",
+      "import": "./dist/component/convex.config.js"
+    },
+    "./_generated/component.js": {
+      "types": "./dist/component/_generated/component.d.ts",
+      "import": "./dist/component/_generated/component.js"
+    },
+    "./test": {
+      "types": "./dist/test.d.ts",
+      "import": "./dist/test.js"
+    }
+  },
+  "scripts": {
+    "codegen": "convex codegen --component-dir src/component",
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "verify": "npm run typecheck && npm run test && npm run build"
+  },
+  "dependencies": {
+    "agentphone": "^1.0.13",
+    "convex": "^1.25.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.30",
+    "convex-test": "^0.0.35",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5",
+    "vitest": "^3.2.2"
+  },
+  "peerDependencies": {
+    "convex": ">=1.25.0"
+  }
+}

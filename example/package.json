@@ -1,0 +1,16 @@
+{
+  "name": "agentphone-convex-example",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "convex dev",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "agentphone-convex": "file:..",
+    "convex": "^1.25.4"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3"
+  }
+}

@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.env.local
+example/.env.local
+example/convex/_generated/
+.convex/
+coverage/
