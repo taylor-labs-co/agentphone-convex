@@ -1,0 +1,21 @@
+.github/workflows/publish.yml
+  s_c5df812bec116e::t_012e479abb80a0 1-72
+package.json
+  s_c5df812bec116e::t_012e479abb80a0 8-19
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.3",
+  "base_commit_sha": "d2bf0d9ca87809bed2ca090f1418ec0ffd516f61",
+  "prompts": {},
+  "sessions": {
+    "s_c5df812bec116e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e9efb-6716-73a3-a672-ea934e33993f",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Evan Taylor <eltaylor1104@gmail.com>"
+    }
+  }
+}
