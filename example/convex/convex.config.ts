@@ -1,6 +1,6 @@
 import { defineApp } from "convex/server";
 import { v } from "convex/values";
-import agentphone from "agentphone-convex/convex.config.js";
+import agentphone from "@taylor-labs/agentphone-convex/convex.config.js";
 
 const app = defineApp({
   env: {
