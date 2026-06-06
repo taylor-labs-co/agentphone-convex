@@ -1,5 +1,5 @@
 {
-  "name": "@taylor-labs/agentphone-convex",
+  "name": "agentphone-convex",
   "version": "0.1.0",
   "description": "Convex component for AgentPhone agents, numbers, calls, conversations, and webhooks.",
   "type": "module",

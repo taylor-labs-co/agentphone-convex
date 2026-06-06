@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 
-import { AgentPhone } from "@taylor-labs/agentphone-convex";
+import { AgentPhone } from "agentphone-convex";
 
 import { action } from "./_generated/server.js";
 import { api, components } from "./_generated/api.js";

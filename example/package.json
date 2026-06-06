@@ -7,7 +7,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@taylor-labs/agentphone-convex": "file:..",
+    "agentphone-convex": "file:..",
     "convex": "^1.25.4"
   },
   "devDependencies": {

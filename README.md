@@ -1,11 +1,11 @@
-# @taylor-labs/agentphone-convex
+# agentphone-convex
 
 Convex component for AgentPhone agents, numbers, messages, conversations, calls, usage, and verified webhooks.
 
 ## Install
 
 ```bash
-npm install @taylor-labs/agentphone-convex agentphone convex
+npm install agentphone-convex agentphone convex
 ```
 
 Add the component to your Convex app:
@@ -14,7 +14,7 @@ Add the component to your Convex app:
 // convex/convex.config.ts
 import { defineApp } from "convex/server";
 import { v } from "convex/values";
-import agentphone from "@taylor-labs/agentphone-convex/convex.config.js";
+import agentphone from "agentphone-convex/convex.config.js";
 
 const app = defineApp({
   env: {
@@ -44,7 +44,7 @@ https://<your-convex-site-url>/agentphone/webhook
 ## Client Helper
 
 ```ts
-import { AgentPhone } from "@taylor-labs/agentphone-convex";
+import { AgentPhone } from "agentphone-convex";
 import { components } from "./_generated/api.js";
 
 const phone = new AgentPhone(components.agentphone);
@@ -77,7 +77,7 @@ Register callback function handles from an app action or mutation:
 ```ts
 import { action } from "./_generated/server.js";
 import { api, components } from "./_generated/api.js";
-import { AgentPhone } from "@taylor-labs/agentphone-convex";
+import { AgentPhone } from "agentphone-convex";
 
 const phone = new AgentPhone(components.agentphone);
 
@@ -123,7 +123,7 @@ For low-latency voice streaming, use the app-owned helper in your own HTTP route
 import { httpRouter } from "convex/server";
 import { httpAction } from "./_generated/server.js";
 import { components } from "./_generated/api.js";
-import { handleAgentPhoneWebhook } from "@taylor-labs/agentphone-convex";
+import { handleAgentPhoneWebhook } from "agentphone-convex";
 
 const http = httpRouter();
 
@@ -162,7 +162,7 @@ The package exports a `convex-test` helper:
 
 ```ts
 import { convexTest } from "convex-test";
-import { registerAgentPhoneComponent } from "@taylor-labs/agentphone-convex/test";
+import { registerAgentPhoneComponent } from "agentphone-convex/test";
 
 const t = convexTest();
 registerAgentPhoneComponent(t, { componentPath: "agentphone" });

@@ -1,6 +1,6 @@
 import { httpRouter } from "convex/server";
 
-import { handleAgentPhoneWebhook } from "@taylor-labs/agentphone-convex";
+import { handleAgentPhoneWebhook } from "agentphone-convex";
 
 import { components } from "./_generated/api.js";
 import { httpAction } from "./_generated/server.js";
