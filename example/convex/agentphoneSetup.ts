@@ -5,7 +5,9 @@ import { AgentPhone } from "agentphone-convex";
 import { action } from "./_generated/server.js";
 import { api, components } from "./_generated/api.js";
 
-const phone = new AgentPhone(components.agentphone);
+const phone = new AgentPhone(components.agentphone, {
+  httpPrefix: "/agentphone",
+});
 
 export const registerCallbacks = action({
   args: {},
@@ -34,18 +36,26 @@ export const createSupportAgent = action({
 });
 
 export const configureWebhook = action({
+  args: {},
+  returns: v.any(),
+  handler: async (ctx) =>
+    phone.ensureProjectWebhook(ctx, {
+      eventTypes: ["agent.message", "agent.call_ended", "agent.reaction"],
+      contextLimit: 10,
+    }),
+});
+
+export const enqueueWelcomeMessage = action({
   args: {
-    siteUrl: v.string(),
+    agentId: v.string(),
+    toNumber: v.string(),
   },
   returns: v.any(),
   handler: async (ctx, args) =>
-    phone.configureProjectWebhook(ctx, {
-      url: `${args.siteUrl}/agentphone/webhook`,
-      event_types: [
-        "agent.message",
-        "agent.call_ended",
-        "agent.reaction",
-      ],
-      context_limit: 10,
+    phone.enqueueMessage(ctx, {
+      agent_id: args.agentId,
+      to_number: args.toNumber,
+      body: "Hello from AgentPhone + Convex.",
+      idempotency_key: `welcome:${args.agentId}:${args.toNumber}`,
     }),
 });

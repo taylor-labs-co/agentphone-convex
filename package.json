@@ -1,6 +1,6 @@
 {
   "name": "agentphone-convex",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Convex component for AgentPhone agents, numbers, calls, conversations, and webhooks.",
   "type": "module",
   "license": "MIT",

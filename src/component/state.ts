@@ -10,8 +10,13 @@ import {
 
 const CALLBACK_KEY = "default";
 
+function callbackKey(agentId: string | undefined) {
+  return agentId ? `agent:${agentId}` : CALLBACK_KEY;
+}
+
 export const registerCallbacks = internalMutation({
   args: {
+    agentId: v.optional(v.string()),
     callbacks: webhookCallbackHandles,
   },
   returns: v.object({
@@ -20,34 +25,39 @@ export const registerCallbacks = internalMutation({
   }),
   handler: async (ctx, args) => {
     const now = Date.now();
+    const key = callbackKey(args.agentId);
     const existing = await ctx.db
       .query("callbackConfigs")
-      .withIndex("by_key", (q) => q.eq("key", CALLBACK_KEY))
+      .withIndex("by_key", (q) => q.eq("key", key))
       .unique();
     if (existing) {
       await ctx.db.patch(existing._id, {
+        agentId: args.agentId,
         handles: args.callbacks,
         updatedAt: now,
       });
     } else {
       await ctx.db.insert("callbackConfigs", {
-        key: CALLBACK_KEY,
+        key,
+        agentId: args.agentId,
         handles: args.callbacks,
         createdAt: now,
         updatedAt: now,
       });
     }
-    return { key: CALLBACK_KEY, callbacks: args.callbacks };
+    return { key, callbacks: args.callbacks };
   },
 });
 
 export const getCallbacks = internalQuery({
-  args: {},
+  args: {
+    agentId: v.optional(v.string()),
+  },
   returns: webhookCallbackHandles,
-  handler: async (ctx) => {
+  handler: async (ctx, args) => {
     const config = await ctx.db
       .query("callbackConfigs")
-      .withIndex("by_key", (q) => q.eq("key", CALLBACK_KEY))
+      .withIndex("by_key", (q) => q.eq("key", callbackKey(args.agentId)))
       .unique();
     return config?.handles ?? {};
   },
@@ -62,6 +72,31 @@ export const getCallbacksInternal = internalQuery({
       .withIndex("by_key", (q) => q.eq("key", CALLBACK_KEY))
       .unique();
     return config?.handles ?? {};
+  },
+});
+
+export const getCallbackHandle = internalQuery({
+  args: {
+    agentId: v.optional(v.string()),
+    callback: callbackName,
+  },
+  returns: v.union(v.string(), v.null()),
+  handler: async (ctx, args) => {
+    if (args.agentId) {
+      const agentConfig = await ctx.db
+        .query("callbackConfigs")
+        .withIndex("by_key", (q) => q.eq("key", callbackKey(args.agentId)))
+        .unique();
+      const handle = agentConfig?.handles[args.callback];
+      if (handle) {
+        return handle;
+      }
+    }
+    const defaultConfig = await ctx.db
+      .query("callbackConfigs")
+      .withIndex("by_key", (q) => q.eq("key", CALLBACK_KEY))
+      .unique();
+    return defaultConfig?.handles[args.callback] ?? null;
   },
 });
 
@@ -220,6 +255,8 @@ export const recordWebhookDelivery = internalMutation({
       agentId: args.normalized.agentId,
       status: "received",
       callback: args.normalized.callback,
+      attempts: 0,
+      maxAttempts: 3,
       receivedAt: now,
     });
     await ctx.db.insert("webhookEvents", {
@@ -242,11 +279,17 @@ export const markWebhookDelivery = internalMutation({
     status: v.union(
       v.literal("received"),
       v.literal("duplicate"),
+      v.literal("retrying"),
       v.literal("dispatched"),
       v.literal("failed"),
+      v.literal("dead_letter"),
       v.literal("ignored"),
     ),
     error: v.optional(v.string()),
+    attempts: v.optional(v.number()),
+    maxAttempts: v.optional(v.number()),
+    nextAttemptAt: v.optional(v.number()),
+    lastAttemptAt: v.optional(v.number()),
   },
   returns: v.null(),
   handler: async (ctx, args) => {
@@ -258,11 +301,49 @@ export const markWebhookDelivery = internalMutation({
       return null;
     }
     await ctx.db.patch(existing._id, {
-      status: args.status,
-      error: args.error,
+      ...stripUndefined({
+        status: args.status,
+        error: args.error,
+        attempts: args.attempts,
+        maxAttempts: args.maxAttempts,
+        nextAttemptAt: args.nextAttemptAt,
+        lastAttemptAt: args.lastAttemptAt,
+      }),
       processedAt: Date.now(),
     });
     return null;
+  },
+});
+
+function stripUndefined<T extends Record<string, unknown>>(value: T): T {
+  return Object.fromEntries(
+    Object.entries(value).filter(([, entry]) => entry !== undefined),
+  ) as T;
+}
+
+export const getWebhookEvent = internalQuery({
+  args: {
+    webhookId: v.string(),
+  },
+  returns: v.union(json, v.null()),
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("webhookEvents")
+      .withIndex("by_webhookId", (q) => q.eq("webhookId", args.webhookId))
+      .unique();
+  },
+});
+
+export const getWebhookDelivery = internalQuery({
+  args: {
+    webhookId: v.string(),
+  },
+  returns: v.union(json, v.null()),
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("webhookDeliveries")
+      .withIndex("by_webhookId", (q) => q.eq("webhookId", args.webhookId))
+      .unique();
   },
 });
 
@@ -275,8 +356,10 @@ export const listDeliveries = internalQuery({
       v.union(
         v.literal("received"),
         v.literal("duplicate"),
+        v.literal("retrying"),
         v.literal("dispatched"),
         v.literal("failed"),
+        v.literal("dead_letter"),
         v.literal("ignored"),
       ),
     ),
@@ -310,5 +393,56 @@ export const listDeliveries = internalQuery({
       .withIndex("by_receivedAt")
       .order("desc")
       .take(limit);
+  },
+});
+
+export const cleanupWebhookDeliveries = internalMutation({
+  args: {
+    olderThan: v.number(),
+    statuses: v.optional(
+      v.array(
+        v.union(
+          v.literal("received"),
+          v.literal("duplicate"),
+          v.literal("retrying"),
+          v.literal("dispatched"),
+          v.literal("failed"),
+          v.literal("dead_letter"),
+          v.literal("ignored"),
+        ),
+      ),
+    ),
+  },
+  returns: v.object({
+    deletedDeliveries: v.number(),
+    deletedEvents: v.number(),
+  }),
+  handler: async (ctx, args) => {
+    const statuses = new Set(args.statuses);
+    const deliveries = await ctx.db
+      .query("webhookDeliveries")
+      .withIndex("by_receivedAt")
+      .collect();
+    let deletedDeliveries = 0;
+    for (const delivery of deliveries) {
+      if (
+        delivery.receivedAt < args.olderThan &&
+        (!args.statuses || statuses.has(delivery.status))
+      ) {
+        await ctx.db.delete(delivery._id);
+        deletedDeliveries += 1;
+      }
+    }
+
+    const events = await ctx.db.query("webhookEvents").withIndex("by_receivedAt").collect();
+    let deletedEvents = 0;
+    for (const event of events) {
+      if (event.receivedAt < args.olderThan) {
+        await ctx.db.delete(event._id);
+        deletedEvents += 1;
+      }
+    }
+
+    return { deletedDeliveries, deletedEvents };
   },
 });

@@ -3,5 +3,8 @@ dist/
 .env.local
 example/.env.local
 example/convex/_generated/
+!example/convex/_generated/
+!example/convex/_generated/api.ts
+!example/convex/_generated/server.ts
 .convex/
 coverage/

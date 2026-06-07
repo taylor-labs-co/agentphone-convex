@@ -1,4 +1,5 @@
 import { action } from "./_generated/server.js";
+import { internal } from "./_generated/api.js";
 import { v } from "convex/values";
 
 import { callAgentPhoneSdk } from "./lib/sdk.js";
@@ -18,22 +19,47 @@ const agentWriteArgs = {
 export const list = action({
   args: paginationArgs,
   returns: json,
-  handler: async (_ctx, args) =>
-    callAgentPhoneSdk("agents", "listAgents", stripUndefined(args)),
+  handler: async (ctx, args) => {
+    const response = await callAgentPhoneSdk(
+      "agents",
+      "listAgents",
+      stripUndefined(args),
+    );
+    await ctx.runMutation(internal.resources.upsertAgentsFromResponse, {
+      response,
+    });
+    return response;
+  },
 });
 
 export const create = action({
   args: agentWriteArgs,
   returns: json,
-  handler: async (_ctx, args) =>
-    callAgentPhoneSdk("agents", "createAgent", stripUndefined(args)),
+  handler: async (ctx, args) => {
+    const response = await callAgentPhoneSdk(
+      "agents",
+      "createAgent",
+      stripUndefined(args),
+    );
+    await ctx.runMutation(internal.resources.upsertAgentsFromResponse, {
+      response,
+    });
+    return response;
+  },
 });
 
 export const get = action({
   args: agentIdArg,
   returns: json,
-  handler: async (_ctx, args) =>
-    callAgentPhoneSdk("agents", "getAgent", { agent_id: args.agent_id }),
+  handler: async (ctx, args) => {
+    const response = await callAgentPhoneSdk("agents", "getAgent", {
+      agent_id: args.agent_id,
+    });
+    await ctx.runMutation(internal.resources.upsertAgentsFromResponse, {
+      response,
+    });
+    return response;
+  },
 });
 
 export const update = action({
@@ -42,8 +68,17 @@ export const update = action({
     ...agentWriteArgs,
   },
   returns: json,
-  handler: async (_ctx, args) =>
-    callAgentPhoneSdk("agents", "updateAgent", stripUndefined(args)),
+  handler: async (ctx, args) => {
+    const response = await callAgentPhoneSdk(
+      "agents",
+      "updateAgent",
+      stripUndefined(args),
+    );
+    await ctx.runMutation(internal.resources.upsertAgentsFromResponse, {
+      response,
+    });
+    return response;
+  },
 });
 
 export const remove = action({
@@ -59,8 +94,13 @@ export const attachNumber = action({
     number_id: v.string(),
   },
   returns: json,
-  handler: async (_ctx, args) =>
-    callAgentPhoneSdk("agents", "attachNumberToAgent", args),
+  handler: async (ctx, args) => {
+    const response = await callAgentPhoneSdk("agents", "attachNumberToAgent", args);
+    await ctx.runMutation(internal.resources.upsertAgentsFromResponse, {
+      response,
+    });
+    return response;
+  },
 });
 
 export const detachNumber = action({
@@ -69,8 +109,17 @@ export const detachNumber = action({
     number_id: v.string(),
   },
   returns: json,
-  handler: async (_ctx, args) =>
-    callAgentPhoneSdk("agents", "detachNumberFromAgent", args),
+  handler: async (ctx, args) => {
+    const response = await callAgentPhoneSdk(
+      "agents",
+      "detachNumberFromAgent",
+      args,
+    );
+    await ctx.runMutation(internal.resources.upsertAgentsFromResponse, {
+      response,
+    });
+    return response;
+  },
 });
 
 export const listVoices = action({
@@ -85,8 +134,17 @@ export const listConversations = action({
     ...paginationArgs,
   },
   returns: json,
-  handler: async (_ctx, args) =>
-    callAgentPhoneSdk("agents", "listAgentConversations", stripUndefined(args)),
+  handler: async (ctx, args) => {
+    const response = await callAgentPhoneSdk(
+      "agents",
+      "listAgentConversations",
+      stripUndefined(args),
+    );
+    await ctx.runMutation(internal.resources.upsertConversationsFromResponse, {
+      response,
+    });
+    return response;
+  },
 });
 
 export const listCalls = action({
@@ -95,6 +153,15 @@ export const listCalls = action({
     ...paginationArgs,
   },
   returns: json,
-  handler: async (_ctx, args) =>
-    callAgentPhoneSdk("agents", "listAgentCalls", stripUndefined(args)),
+  handler: async (ctx, args) => {
+    const response = await callAgentPhoneSdk(
+      "agents",
+      "listAgentCalls",
+      stripUndefined(args),
+    );
+    await ctx.runMutation(internal.resources.upsertCallsFromResponse, {
+      response,
+    });
+    return response;
+  },
 });

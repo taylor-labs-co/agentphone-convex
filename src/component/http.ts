@@ -71,18 +71,26 @@ http.route({
       return jsonResponse({ ok: true, duplicate: true });
     }
 
-    const callbacks = await ctx.runQuery(internal.state.getCallbacksInternal, {});
     const callbackName = normalized.callback;
-    const handle = callbackName ? callbacks[callbackName] : undefined;
-    if (!callbackName || !handle) {
-      await ctx.runMutation(internal.state.markWebhookDelivery, {
-        webhookId,
-        status: "ignored",
-      });
-      return jsonResponse({ ok: true, ignored: true });
-    }
+    await ctx.runMutation(internal.resources.upsertFromWebhook, {
+      webhookId,
+      receivedAt: Date.now(),
+      normalized,
+      payload,
+    });
 
     if (callbackName === "onVoiceMessage") {
+      const handle = await ctx.runQuery(internal.state.getCallbackHandle, {
+        agentId: normalized.agentId,
+        callback: callbackName,
+      });
+      if (!handle) {
+        await ctx.runMutation(internal.state.markWebhookDelivery, {
+          webhookId,
+          status: "ignored",
+        });
+        return jsonResponse({ ok: true, ignored: true });
+      }
       try {
         const response = await ctx.runAction(
           handle as FunctionHandle<"action">,
@@ -105,13 +113,13 @@ http.route({
 
     await ctx.scheduler.runAfter(
       0,
-      handle as FunctionHandle<"action">,
-      normalized,
+      internal.webhooks.dispatchCallback,
+      {
+        webhookId,
+        normalized,
+        attempt: 1,
+      },
     );
-    await ctx.runMutation(internal.state.markWebhookDelivery, {
-      webhookId,
-      status: "dispatched",
-    });
     return jsonResponse({ ok: true });
   }),
 });

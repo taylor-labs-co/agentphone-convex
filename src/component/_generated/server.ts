@@ -24,6 +24,7 @@ import type { DataModel } from "./dataModel.js";
 export interface Env {
   AGENTPHONE_API_KEY: string;
   AGENTPHONE_BASE_URL?: string;
+  CONVEX_SITE_URL?: string;
 }
 
 export const query: QueryBuilder<DataModel, "public"> = queryGeneric;

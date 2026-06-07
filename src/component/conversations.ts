@@ -1,4 +1,5 @@
 import { action } from "./_generated/server.js";
+import { internal } from "./_generated/api.js";
 import { v } from "convex/values";
 
 import { callAgentPhoneSdk } from "./lib/sdk.js";
@@ -16,15 +17,33 @@ export const list = action({
     number_id: v.optional(v.string()),
   },
   returns: json,
-  handler: async (_ctx, args) =>
-    callAgentPhoneSdk("conversations", "listConversations", stripUndefined(args)),
+  handler: async (ctx, args) => {
+    const response = await callAgentPhoneSdk(
+      "conversations",
+      "listConversations",
+      stripUndefined(args),
+    );
+    await ctx.runMutation(internal.resources.upsertConversationsFromResponse, {
+      response,
+    });
+    return response;
+  },
 });
 
 export const get = action({
   args: conversationIdArg,
   returns: json,
-  handler: async (_ctx, args) =>
-    callAgentPhoneSdk("conversations", "getConversation", args),
+  handler: async (ctx, args) => {
+    const response = await callAgentPhoneSdk(
+      "conversations",
+      "getConversation",
+      args,
+    );
+    await ctx.runMutation(internal.resources.upsertConversationsFromResponse, {
+      response,
+    });
+    return response;
+  },
 });
 
 export const update = action({
@@ -35,8 +54,17 @@ export const update = action({
     tags: v.optional(v.array(v.string())),
   },
   returns: json,
-  handler: async (_ctx, args) =>
-    callAgentPhoneSdk("conversations", "updateConversation", stripUndefined(args)),
+  handler: async (ctx, args) => {
+    const response = await callAgentPhoneSdk(
+      "conversations",
+      "updateConversation",
+      stripUndefined(args),
+    );
+    await ctx.runMutation(internal.resources.upsertConversationsFromResponse, {
+      response,
+    });
+    return response;
+  },
 });
 
 export const listMessages = action({
@@ -45,12 +73,17 @@ export const listMessages = action({
     ...paginationArgs,
   },
   returns: json,
-  handler: async (_ctx, args) =>
-    callAgentPhoneSdk(
+  handler: async (ctx, args) => {
+    const response = await callAgentPhoneSdk(
       "conversations",
       "getConversationMessages",
       stripUndefined(args),
-    ),
+    );
+    await ctx.runMutation(internal.resources.upsertMessagesFromResponse, {
+      response,
+    });
+    return response;
+  },
 });
 
 export const sendTypingIndicator = action({

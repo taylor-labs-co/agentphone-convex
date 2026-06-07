@@ -12,7 +12,10 @@ export const agentPhoneComponentModules = {
   "./component/http.js": () => import("./component/http.js"),
   "./component/messages.js": () => import("./component/messages.js"),
   "./component/numbers.js": () => import("./component/numbers.js"),
+  "./component/outbound.js": () => import("./component/outbound.js"),
+  "./component/resources.js": () => import("./component/resources.js"),
   "./component/state.js": () => import("./component/state.js"),
+  "./component/sync.js": () => import("./component/sync.js"),
   "./component/usage.js": () => import("./component/usage.js"),
   "./component/webhooks.js": () => import("./component/webhooks.js"),
 };

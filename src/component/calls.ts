@@ -1,4 +1,5 @@
 import { action } from "./_generated/server.js";
+import { internal } from "./_generated/api.js";
 import { v } from "convex/values";
 
 import { callAgentPhoneSdk } from "./lib/sdk.js";
@@ -19,8 +20,17 @@ export const list = action({
     number_id: v.optional(v.string()),
   },
   returns: json,
-  handler: async (_ctx, args) =>
-    callAgentPhoneSdk("calls", "listCalls", stripUndefined(args)),
+  handler: async (ctx, args) => {
+    const response = await callAgentPhoneSdk(
+      "calls",
+      "listCalls",
+      stripUndefined(args),
+    );
+    await ctx.runMutation(internal.resources.upsertCallsFromResponse, {
+      response,
+    });
+    return response;
+  },
 });
 
 export const listForNumber = action({
@@ -30,14 +40,29 @@ export const listForNumber = action({
     ...dateRangeArgs,
   },
   returns: json,
-  handler: async (_ctx, args) =>
-    callAgentPhoneSdk("calls", "listCallsForNumber", stripUndefined(args)),
+  handler: async (ctx, args) => {
+    const response = await callAgentPhoneSdk(
+      "calls",
+      "listCallsForNumber",
+      stripUndefined(args),
+    );
+    await ctx.runMutation(internal.resources.upsertCallsFromResponse, {
+      response,
+    });
+    return response;
+  },
 });
 
 export const get = action({
   args: callIdArg,
   returns: json,
-  handler: async (_ctx, args) => callAgentPhoneSdk("calls", "getCall", args),
+  handler: async (ctx, args) => {
+    const response = await callAgentPhoneSdk("calls", "getCall", args);
+    await ctx.runMutation(internal.resources.upsertCallsFromResponse, {
+      response,
+    });
+    return response;
+  },
 });
 
 export const createOutbound = action({
@@ -46,20 +71,38 @@ export const createOutbound = action({
     to_number: v.string(),
     from_number_id: v.optional(v.string()),
     metadata: v.optional(json),
+    test_mode: v.optional(v.boolean()),
   },
   returns: json,
-  handler: async (_ctx, args) =>
-    callAgentPhoneSdk("calls", "createOutboundCall", stripUndefined(args)),
+  handler: async (ctx, args) => {
+    const request = stripUndefined({ ...args, test_mode: undefined });
+    const response = args.test_mode
+      ? { testMode: true, status: "skipped", kind: "outboundCall", args: request }
+      : await callAgentPhoneSdk("calls", "createOutboundCall", request);
+    await ctx.runMutation(internal.resources.upsertCallsFromResponse, {
+      response,
+    });
+    return response;
+  },
 });
 
 export const createWeb = action({
   args: {
     agent_id: v.string(),
     metadata: v.optional(json),
+    test_mode: v.optional(v.boolean()),
   },
   returns: json,
-  handler: async (_ctx, args) =>
-    callAgentPhoneSdk("calls", "createWebCall", stripUndefined(args)),
+  handler: async (ctx, args) => {
+    const request = stripUndefined({ ...args, test_mode: undefined });
+    const response = args.test_mode
+      ? { testMode: true, status: "skipped", kind: "webCall", args: request }
+      : await callAgentPhoneSdk("calls", "createWebCall", request);
+    await ctx.runMutation(internal.resources.upsertCallsFromResponse, {
+      response,
+    });
+    return response;
+  },
 });
 
 export const end = action({
@@ -71,13 +114,25 @@ export const end = action({
 export const getRecording = action({
   args: callIdArg,
   returns: json,
-  handler: async (_ctx, args) =>
-    callAgentPhoneSdk("calls", "getCallRecording", args),
+  handler: async (ctx, args) => {
+    const response = await callAgentPhoneSdk("calls", "getCallRecording", args);
+    await ctx.runMutation(internal.resources.upsertCallRecording, {
+      callId: args.call_id,
+      response,
+    });
+    return response;
+  },
 });
 
 export const getTranscript = action({
   args: callIdArg,
   returns: json,
-  handler: async (_ctx, args) =>
-    callAgentPhoneSdk("calls", "getCallTranscript", args),
+  handler: async (ctx, args) => {
+    const response = await callAgentPhoneSdk("calls", "getCallTranscript", args);
+    await ctx.runMutation(internal.resources.upsertCallTranscript, {
+      callId: args.call_id,
+      response,
+    });
+    return response;
+  },
 });
