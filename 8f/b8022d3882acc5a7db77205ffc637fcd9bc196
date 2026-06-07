@@ -1,0 +1,88 @@
+example/convex/agentphoneSetup.ts
+  s_c5df812bec116e::t_691e649e702f8a 8-10,39-48,50-51,55-59
+example/tsconfig.json
+  s_c5df812bec116e::t_c3577fb150bb74 8-15
+example/convex/_generated/server.ts
+  s_c5df812bec116e::t_57c0218792e88a 1-11
+.gitignore
+  s_c5df812bec116e::t_4635d224814a1b 6-8
+tests/client.test.ts
+  s_c5df812bec116e::t_30aa09a94d1e17 232,236
+  s_c5df812bec116e::t_1fccd28fcd8355 3-10,21-48,50,53-56,93-231,233-234
+src/component/resources.ts
+  s_c5df812bec116e::t_96471b45fc1a6f 1-115,185-403,416-418,431-657,662-699
+  s_c5df812bec116e::t_8ff67969bde44e 116-184,404-415,419-430,658-661
+src/component/_generated/server.ts
+  s_c5df812bec116e::t_612435cb96dbc1 27
+src/component/calls.ts
+  s_c5df812bec116e::t_bf9346e2ed70e7 117-124,130-137
+  s_c5df812bec116e::t_fb80f6b20937bb 2,23-33,43-53,59-65,74,77-86,93,96-105
+tests/webhookDispatch.test.ts
+  s_c5df812bec116e::t_57b91db538ba75 1-19
+src/component/messages.ts
+  s_c5df812bec116e::t_bf4d7e4c3cce43 2,16,19-31
+src/component/numbers.ts
+  s_c5df812bec116e::t_063f9ff977a269 2,11-21,33-43,52-62
+src/component/sync.ts
+  s_c5df812bec116e::t_8f128ca05160c2 1-158
+src/component/conversations.ts
+  s_c5df812bec116e::t_b405fb393f23de 2,20-30,36-46,57-67,76-77,81-86
+src/component/http.ts
+  s_c5df812bec116e::t_57582e1492fc67 75-80,83-93,116-121
+src/component/lib/webhookDispatch.ts
+  s_c5df812bec116e::t_26ca45579cb9c2 1-22
+src/component/outbound.ts
+  s_c5df812bec116e::t_3e36b2e152ca8f 1-186,188-193,195-207,209-212,214-285,290-367
+  s_c5df812bec116e::t_3a877d1d007cdc 187,194,208,213
+  s_c5df812bec116e::t_5c28b79e742761 286-289
+src/test.ts
+  s_c5df812bec116e::t_2762b41a1e11e2 15-16,18
+src/component/state.ts
+  s_c5df812bec116e::t_7bf414a6c547b5 304-311,318-322
+  s_c5df812bec116e::t_5cf6e619ea89e1 258-259,282,285,289-292,324-349,359,362
+  s_c5df812bec116e::t_34026851214957 13-16,19,28,31,35,41-42,48,53-55,57,60,78-99
+  s_c5df812bec116e::t_d3dfde43b30eee 398-448
+src/component/webhooks.ts
+  s_c5df812bec116e::t_048d8d102d9981 1,4,13-16,27-46,50,59,62,66,72-73,79,84-86,88,91,130-174,320,354-420,479-486,494-565
+src/client/index.ts
+  s_c5df812bec116e::t_316cb07c35dc83 343-349
+  s_c5df812bec116e::t_816c04394fb4d5 1-2,7-13,29-50,58-62,64-82,93-96,103-105,170,210-213,217,236-256,312-329,333,350-424,433-463,485-520
+  s_c5df812bec116e::t_08c0f4b7c45fc6 425-432
+  s_c5df812bec116e::t_b31c70772c59fb 97-102
+  s_c5df812bec116e::t_8ececc40426ffd 3-6,16,20,24
+  s_c5df812bec116e::t_9653e25e177dbc 83-92
+src/component/schema.ts
+  s_c5df812bec116e::t_e9f819d4475d69 14,18-169,199,202,214-217
+src/component/lib/resourceState.ts
+  s_c5df812bec116e::t_1490271acc5d6e 1-5,11-138,142-185
+  s_c5df812bec116e::t_ab1d4cd176e3d4 6-10,139-141
+README.md
+  s_c5df812bec116e::t_b4fc0815b865b7 234-237,254,257
+  s_c5df812bec116e::t_d1d290c74daed2 155-157,167,169-196
+  s_c5df812bec116e::t_9a8846a3e391ee 77-127
+  s_c5df812bec116e::t_adf5d552311ac3 50-54
+src/component/agents.ts
+  s_c5df812bec116e::t_4b7d46856a6e3f 2,22-32,38-48,54-62,71-81,97-103,112-122,137-147,156-166
+package.json
+  s_c5df812bec116e::t_a78972917ab54a 3
+tests/resourceState.test.ts
+  s_c5df812bec116e::t_6ee9882d456ca8 1-59
+example/convex/_generated/api.ts
+  s_c5df812bec116e::t_c7abf4a84a96c5 1-4
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.3",
+  "base_commit_sha": "8fb8022d3882acc5a7db77205ffc637fcd9bc196",
+  "prompts": {},
+  "sessions": {
+    "s_c5df812bec116e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e9efb-6716-73a3-a672-ea934e33993f",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Evan Taylor <eltaylor1104@gmail.com>"
+    }
+  }
+}
