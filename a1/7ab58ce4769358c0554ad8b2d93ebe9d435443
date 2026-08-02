@@ -1,0 +1,27 @@
+src/client/routes.test.ts
+  s_afc7f786d95645::t_a9f5083d4e52d2 1,6-9,37,76,95,114
+  s_afc7f786d95645::t_cf975bf73efdf2 2-5,10-36,38-75,77-94,96-113,115-127
+CHANGELOG.md
+  s_afc7f786d95645::t_cf975bf73efdf2 19
+  s_afc7f786d95645::t_65042152aad3f2 16-17
+README.md
+  s_afc7f786d95645::t_cf975bf73efdf2 122-127
+src/client/index.ts
+  s_afc7f786d95645::t_cf975bf73efdf2 160-175
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "a17ab58ce4769358c0554ad8b2d93ebe9d435443",
+  "prompts": {},
+  "sessions": {
+    "s_afc7f786d95645": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fbc09-2b63-7840-9643-49aff9df9bc2",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Evan Taylor <eltaylor1104@gmail.com>"
+    }
+  }
+}
