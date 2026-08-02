@@ -117,7 +117,9 @@ export const configureAgentPhoneWebhook = internalAction({
 `https://YOUR_CONVEX_SITE/agentphone/webhook?scope=default` and stores the
 rotating signing secret inside the component. `configureProjectWebhook` is an
 alias. Use `configureAgentWebhook(ctx, { agentId })` for an agent override, or
-`setWebhookSecret` if the webhook was configured manually.
+`setWebhookSecret` if the webhook was configured manually. Passing `agentId` to
+`setWebhookSecret` stores the secret under the same agent scope that
+`configureAgentWebhook` uses, so agent deliveries verify against it.
 
 Passing `AGENTPHONE_WEBHOOK_SECRET` directly to the client binds that webhook
 route to the client's configured scope; requests naming another scope receive a

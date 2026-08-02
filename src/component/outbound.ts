@@ -23,6 +23,9 @@ const queueOptions = {
   testMode: v.optional(v.boolean()),
 };
 
+/** Delay before re-attempting the post-send write that records a sent request. */
+const PERSIST_RETRY_DELAY_MS = 1000;
+
 const enqueueResult = v.object({
   requestId: v.id("outboundRequests"),
   status: outboundStatusValidator,
@@ -215,8 +218,9 @@ export const processRequest = internalAction({
     const claimed = await ctx.runMutation(internal.outbound.claim, args);
     if (!claimed) return null;
 
+    let result: unknown;
     try {
-      const result = claimed.testMode
+      result = claimed.testMode
         ? {
             testMode: true,
             status: "skipped",
@@ -231,38 +235,9 @@ export const processRequest = internalAction({
             subAccountId: claimed.subAccountId,
             baseUrl: claimed.baseUrl,
           });
-
-      await ctx.runMutation(internal.outbound.markSent, {
-        requestId: args.requestId,
-        result,
-      });
-      try {
-        if (claimed.kind === "message") {
-          await ctx.runMutation(internal.resources.upsertMessagesFromResponse, {
-            scope: claimed.scope,
-            response: result,
-          });
-        } else {
-          await ctx.runMutation(internal.resources.upsertCallsFromResponse, {
-            scope: claimed.scope,
-            response: result,
-          });
-        }
-        await ctx.runMutation(internal.events.recordApiEvent, {
-          scope: claimed.scope,
-          eventType:
-            claimed.kind === "message" ? "message.sent" : "call.created",
-          ...(claimed.agentId && { agentId: claimed.agentId }),
-          direction: "outbound",
-          payload: result,
-        });
-      } catch (error) {
-        console.error(
-          "AgentPhone request sent but local state sync failed",
-          error,
-        );
-      }
     } catch (error) {
+      // Only transport failures reach this branch, so retrying cannot submit
+      // an already-accepted request a second time.
       const retry = claimed.attempt < claimed.maxAttempts;
       const delayMs = retryDelayMs(claimed.attempt);
       await ctx.runMutation(internal.outbound.markFailed, {
@@ -278,6 +253,50 @@ export const processRequest = internalAction({
           args,
         );
       }
+      return null;
+    }
+
+    // AgentPhone accepted the request. Everything below only persists that
+    // outcome, so failures here are never retried through the send path.
+    const markSentArgs = { requestId: args.requestId, result };
+    try {
+      await ctx.runMutation(internal.outbound.markSent, markSentArgs);
+    } catch (error) {
+      console.error(
+        "AgentPhone request sent but recording it failed; retrying the write",
+        error,
+      );
+      await ctx.scheduler.runAfter(
+        PERSIST_RETRY_DELAY_MS,
+        internal.outbound.markSent,
+        markSentArgs,
+      );
+    }
+
+    try {
+      if (claimed.kind === "message") {
+        await ctx.runMutation(internal.resources.upsertMessagesFromResponse, {
+          scope: claimed.scope,
+          response: result,
+        });
+      } else {
+        await ctx.runMutation(internal.resources.upsertCallsFromResponse, {
+          scope: claimed.scope,
+          response: result,
+        });
+      }
+      await ctx.runMutation(internal.events.recordApiEvent, {
+        scope: claimed.scope,
+        eventType: claimed.kind === "message" ? "message.sent" : "call.created",
+        ...(claimed.agentId && { agentId: claimed.agentId }),
+        direction: "outbound",
+        payload: result,
+      });
+    } catch (error) {
+      console.error(
+        "AgentPhone request sent but local state sync failed",
+        error,
+      );
     }
     return null;
   },

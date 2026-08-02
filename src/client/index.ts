@@ -256,7 +256,9 @@ export class AgentPhone {
     args: { secret: string; scope?: string; agentId?: string },
   ) {
     return await ctx.runMutation(this.componentApi.webhooks.setSecret, {
-      scope: args.scope ?? this.scope,
+      scope:
+        args.scope ??
+        (args.agentId ? this.agentScope(args.agentId) : this.scope),
       secret: args.secret,
       agentId: args.agentId,
       subAccountId: this.subAccountId,

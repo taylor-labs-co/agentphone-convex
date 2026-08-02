@@ -17,6 +17,10 @@
   while making the camel-case client canonical.
 - Cache fetched call recordings alongside call transcripts.
 - Bind global webhook secret overrides to the configured component scope.
+- Store manually configured agent webhook secrets under the agent scope that
+  agent webhook configuration and delivery already use.
+- Retry outbound queue work only for transport failures so a post-send write
+  failure can no longer resend an accepted message or call.
 
 ## 0.2.0
 
