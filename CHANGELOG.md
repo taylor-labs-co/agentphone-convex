@@ -21,6 +21,8 @@
   agent webhook configuration and delivery already use.
 - Retry outbound queue work only for transport failures so a post-send write
   failure can no longer resend an accepted message or call.
+- Send a stable `Idempotency-Key` on every attempt of a queued outbound send so
+  a retry after an ambiguous transport failure is not treated as a new send.
 - Accept agent scopes derived from the configured scope on the webhook route
   when a global webhook secret override is set, while still rejecting scopes
   owned by another tenant.

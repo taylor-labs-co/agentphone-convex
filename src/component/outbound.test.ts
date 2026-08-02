@@ -69,4 +69,38 @@ describe("durable outbound queue", () => {
     });
     expect(status).toMatchObject({ status: "failed", attempts: 2 });
   });
+
+  test("repeats one idempotency key when an ambiguous send is retried", async () => {
+    vi.useFakeTimers();
+    vi.stubEnv("AGENTPHONE_API_KEY", "test_token");
+    // The provider accepts the request but the response never arrives, so the
+    // retry cannot tell whether the first attempt took effect.
+    const fetchMock = vi
+      .fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>()
+      .mockRejectedValueOnce(new TypeError("network connection lost"))
+      .mockResolvedValueOnce(Response.json({ id: "msg_123", status: "sent" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const testConvex = initConvexTest();
+
+    const queued = await testConvex.mutation(api.outbound.enqueueMessage, {
+      scope: "default",
+      agentId: "agt_123",
+      toNumber: "+15550000002",
+      body: "Send me at most once",
+      maxAttempts: 2,
+    });
+    await testConvex.finishAllScheduledFunctions(vi.runAllTimers);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const keys = fetchMock.mock.calls.map((call) =>
+      new Headers(call[1]?.headers).get("Idempotency-Key"),
+    );
+    expect(keys[0]).toBe(queued.requestId);
+    expect(keys[1]).toBe(keys[0]);
+    const status = await testConvex.query(api.outbound.getStatus, {
+      scope: "default",
+      requestId: queued.requestId,
+    });
+    expect(status).toMatchObject({ status: "sent", attempts: 2 });
+  });
 });

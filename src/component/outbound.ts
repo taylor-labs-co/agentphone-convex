@@ -234,6 +234,10 @@ export const processRequest = internalAction({
             body: claimed.payload,
             subAccountId: claimed.subAccountId,
             baseUrl: claimed.baseUrl,
+            // The request id is stable across attempts and unique per queued
+            // request, so a retry after an ambiguous transport failure repeats
+            // the same key instead of looking like a new send.
+            idempotencyKey: args.requestId,
           });
     } catch (error) {
       // Only transport failures reach this branch, so retrying cannot submit

@@ -214,6 +214,11 @@ The queue stores request data, never the API key. Its scheduled actions read
 `enqueueOutboundCall` and `enqueueWebCall`. Query or manage work with
 `getOutboundStatus`, `listOutboundRequests`, and `cancelOutboundRequest`.
 
+`idempotencyKey` deduplicates enqueues in Convex. Retries are additionally
+protected end to end: only transport failures are retried, and every attempt for
+a queued request sends the same `Idempotency-Key` header so a retry after an
+ambiguous network failure is not treated as a new send.
+
 Set `testMode: true` on a direct or queued request—or on the client—to exercise
 the component without an API key or provider call.
 

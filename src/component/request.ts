@@ -28,6 +28,11 @@ export type AgentPhoneRequest = {
   body?: unknown;
   subAccountId?: string;
   baseUrl?: string;
+  /**
+   * Stable per-request key repeated on every retry, so a provider that honors
+   * it collapses a resubmission caused by an ambiguous transport failure.
+   */
+  idempotencyKey?: string;
 };
 
 export async function agentPhoneRequest(
@@ -40,6 +45,9 @@ export async function agentPhoneRequest(
   });
   if (args.subAccountId) {
     headers.set("X-Sub-Account-Id", args.subAccountId);
+  }
+  if (args.idempotencyKey) {
+    headers.set("Idempotency-Key", args.idempotencyKey);
   }
 
   const init: RequestInit = {
