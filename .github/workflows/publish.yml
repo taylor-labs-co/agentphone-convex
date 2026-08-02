@@ -11,7 +11,9 @@ permissions:
 jobs:
   publish:
     name: Publish to npm
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    # npm provenance is only accepted from GitHub-hosted runners; Blacksmith
+    # runners report as "self-hosted" and the registry rejects the bundle.
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
       contents: read
