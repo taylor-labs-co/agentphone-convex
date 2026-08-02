@@ -1,0 +1,21 @@
+.github/workflows/ci.yml
+  s_afc7f786d95645::t_1658f4de0d4f69 17,20-21,23
+.github/workflows/publish.yml
+  s_afc7f786d95645::t_1658f4de0d4f69 13-14,20-21,23
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "f950640cb02841f71a08d55adaa956c4449b76ce",
+  "prompts": {},
+  "sessions": {
+    "s_afc7f786d95645": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fbc09-2b63-7840-9643-49aff9df9bc2",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Evan Taylor <eltaylor1104@gmail.com>"
+    }
+  }
+}
