@@ -70,6 +70,66 @@ describe("durable outbound queue", () => {
     expect(status).toMatchObject({ status: "failed", attempts: 2 });
   });
 
+  test("fails immediately on definitive AgentPhone rejections", async () => {
+    vi.useFakeTimers();
+    vi.stubEnv("AGENTPHONE_API_KEY", "test_token");
+    const testConvex = initConvexTest();
+
+    for (const status of [400, 401, 403, 404, 422]) {
+      const fetchMock = vi.fn(async () =>
+        Response.json({ error: "rejected" }, { status }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+
+      const queued = await testConvex.mutation(api.outbound.enqueueMessage, {
+        scope: "default",
+        agentId: "agt_123",
+        toNumber: "+15550000002",
+        body: `Rejected with ${status}`,
+        maxAttempts: 3,
+      });
+      await testConvex.finishAllScheduledFunctions(vi.runAllTimers);
+
+      expect(fetchMock).toHaveBeenCalledOnce();
+      expect(
+        await testConvex.query(api.outbound.getStatus, {
+          scope: "default",
+          requestId: queued.requestId,
+        }),
+      ).toMatchObject({ status: "failed", attempts: 1 });
+    }
+  });
+
+  test("retries throttled and server-side AgentPhone failures", async () => {
+    vi.useFakeTimers();
+    vi.stubEnv("AGENTPHONE_API_KEY", "test_token");
+    const testConvex = initConvexTest();
+
+    for (const status of [408, 429, 500, 502]) {
+      const fetchMock = vi.fn(async () =>
+        Response.json({ error: "try again" }, { status }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+
+      const queued = await testConvex.mutation(api.outbound.enqueueMessage, {
+        scope: "default",
+        agentId: "agt_123",
+        toNumber: "+15550000002",
+        body: `Retryable ${status}`,
+        maxAttempts: 2,
+      });
+      await testConvex.finishAllScheduledFunctions(vi.runAllTimers);
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(
+        await testConvex.query(api.outbound.getStatus, {
+          scope: "default",
+          requestId: queued.requestId,
+        }),
+      ).toMatchObject({ status: "failed", attempts: 2 });
+    }
+  });
+
   test("repeats one idempotency key when an ambiguous send is retried", async () => {
     vi.useFakeTimers();
     vi.stubEnv("AGENTPHONE_API_KEY", "test_token");

@@ -20,6 +20,17 @@ export const request = action({
   },
 });
 
+/** Error carrying the AgentPhone HTTP status so callers can classify failures. */
+export class AgentPhoneApiError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "AgentPhoneApiError";
+    this.status = status;
+  }
+}
+
 export type AgentPhoneRequest = {
   token: string;
   method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
@@ -69,8 +80,9 @@ export async function agentPhoneRequest(
       typeof responseBody === "string"
         ? responseBody
         : JSON.stringify(responseBody);
-    throw new Error(
+    throw new AgentPhoneApiError(
       `AgentPhone API ${args.method} ${url.pathname} failed (${response.status}): ${detail}`,
+      response.status,
     );
   }
   return responseBody;

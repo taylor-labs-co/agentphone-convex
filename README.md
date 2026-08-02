@@ -215,9 +215,11 @@ The queue stores request data, never the API key. Its scheduled actions read
 `getOutboundStatus`, `listOutboundRequests`, and `cancelOutboundRequest`.
 
 `idempotencyKey` deduplicates enqueues in Convex. Retries are additionally
-protected end to end: only transport failures are retried, and every attempt for
-a queued request sends the same `Idempotency-Key` header so a retry after an
-ambiguous network failure is not treated as a new send.
+protected end to end: only send failures that can succeed later are retried—
+transport errors, `408`, `429`, and `5xx`—while rejected, unauthorized, and
+forbidden requests fail immediately. Every attempt for a queued request sends
+the same `Idempotency-Key` header, so a retry after an ambiguous network failure
+is not treated as a new send.
 
 Set `testMode: true` on a direct or queued request—or on the client—to exercise
 the component without an API key or provider call.

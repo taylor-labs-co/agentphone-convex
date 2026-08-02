@@ -8,7 +8,7 @@ import {
 } from "./_generated/server.js";
 import type { MutationCtx } from "./_generated/server.js";
 import schema from "./schema.js";
-import { agentPhoneRequest } from "./request.js";
+import { AgentPhoneApiError, agentPhoneRequest } from "./request.js";
 import {
   outboundKindValidator,
   outboundStatusValidator,
@@ -240,9 +240,10 @@ export const processRequest = internalAction({
             idempotencyKey: args.requestId,
           });
     } catch (error) {
-      // Only transport failures reach this branch, so retrying cannot submit
-      // an already-accepted request a second time.
-      const retry = claimed.attempt < claimed.maxAttempts;
+      // Only send failures reach this branch, so retrying cannot submit an
+      // already-recorded request a second time.
+      const retry =
+        claimed.attempt < claimed.maxAttempts && isRetryableError(error);
       const delayMs = retryDelayMs(claimed.attempt);
       await ctx.runMutation(internal.outbound.markFailed, {
         requestId: args.requestId,
@@ -467,6 +468,18 @@ function requiredApiKey() {
     );
   }
   return value;
+}
+
+/**
+ * Retry transport failures and AgentPhone statuses that can succeed later.
+ * Rejected requests, expired credentials, and forbidden operations are
+ * terminal, so resubmitting them only delays the failure.
+ */
+function isRetryableError(error: unknown) {
+  if (error instanceof AgentPhoneApiError) {
+    return error.status === 408 || error.status === 429 || error.status >= 500;
+  }
+  return true;
 }
 
 function retryDelayMs(attempt: number) {
