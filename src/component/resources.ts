@@ -1,55 +1,57 @@
-import { internalMutation, query } from "./_generated/server.js";
 import { v } from "convex/values";
-
+import type { MutationCtx } from "./_generated/server.js";
+import { internalMutation, query } from "./_generated/server.js";
 import {
+  counterpartyFor,
   extractAgentPhoneRecords,
+  parseTimestamp,
   providerId,
   resourceSnapshotsFromWebhook,
-  parseTimestamp,
-  counterpartyFor,
 } from "./lib/resourceState.js";
-import { json, normalizedWebhookEvent } from "./lib/validators.js";
+import schema from "./schema.js";
+import { agentPhoneEventValidator } from "./validators.js";
 
 const resourceListArgs = {
+  scope: v.string(),
   limit: v.optional(v.number()),
 };
 
 export const upsertFromWebhook = internalMutation({
   args: {
-    webhookId: v.string(),
+    scope: v.string(),
+    deliveryId: v.string(),
     receivedAt: v.number(),
-    normalized: normalizedWebhookEvent,
-    payload: json,
+    event: agentPhoneEventValidator,
   },
   returns: v.null(),
   handler: async (ctx, args) => {
     const snapshots = resourceSnapshotsFromWebhook(args);
     if (snapshots.agent) {
-      await upsertAgent(ctx, snapshots.agent);
+      await upsertAgent(ctx, args.scope, snapshots.agent);
     }
     if (snapshots.number) {
-      await upsertNumber(ctx, snapshots.number);
+      await upsertNumber(ctx, args.scope, snapshots.number);
     }
     if (snapshots.conversation) {
-      await upsertConversation(ctx, snapshots.conversation);
+      await upsertConversation(ctx, args.scope, snapshots.conversation);
     }
     if (snapshots.message) {
-      await upsertMessage(ctx, snapshots.message);
+      await upsertMessage(ctx, args.scope, snapshots.message);
     }
     if (snapshots.call) {
-      await upsertCall(ctx, snapshots.call);
+      await upsertCall(ctx, args.scope, snapshots.call);
     }
     return null;
   },
 });
 
 export const upsertAgentsFromResponse = internalMutation({
-  args: { response: json },
+  args: { scope: v.string(), response: v.any() },
   returns: v.number(),
   handler: async (ctx, args) => {
     let count = 0;
     for (const record of extractAgentPhoneRecords(args.response)) {
-      if (await upsertAgent(ctx, normalizeAgent(record))) {
+      if (await upsertAgent(ctx, args.scope, normalizeAgent(record))) {
         count += 1;
       }
     }
@@ -58,12 +60,12 @@ export const upsertAgentsFromResponse = internalMutation({
 });
 
 export const upsertNumbersFromResponse = internalMutation({
-  args: { response: json },
+  args: { scope: v.string(), response: v.any() },
   returns: v.number(),
   handler: async (ctx, args) => {
     let count = 0;
     for (const record of extractAgentPhoneRecords(args.response)) {
-      if (await upsertNumber(ctx, normalizeNumber(record))) {
+      if (await upsertNumber(ctx, args.scope, normalizeNumber(record))) {
         count += 1;
       }
     }
@@ -72,12 +74,14 @@ export const upsertNumbersFromResponse = internalMutation({
 });
 
 export const upsertConversationsFromResponse = internalMutation({
-  args: { response: json },
+  args: { scope: v.string(), response: v.any() },
   returns: v.number(),
   handler: async (ctx, args) => {
     let count = 0;
     for (const record of extractAgentPhoneRecords(args.response)) {
-      if (await upsertConversation(ctx, normalizeConversation(record))) {
+      if (
+        await upsertConversation(ctx, args.scope, normalizeConversation(record))
+      ) {
         count += 1;
       }
     }
@@ -86,12 +90,12 @@ export const upsertConversationsFromResponse = internalMutation({
 });
 
 export const upsertMessagesFromResponse = internalMutation({
-  args: { response: json },
+  args: { scope: v.string(), response: v.any() },
   returns: v.number(),
   handler: async (ctx, args) => {
     let count = 0;
     for (const record of extractAgentPhoneRecords(args.response)) {
-      if (await upsertMessage(ctx, normalizeMessage(record))) {
+      if (await upsertMessage(ctx, args.scope, normalizeMessage(record))) {
         count += 1;
       }
     }
@@ -100,12 +104,12 @@ export const upsertMessagesFromResponse = internalMutation({
 });
 
 export const upsertCallsFromResponse = internalMutation({
-  args: { response: json },
+  args: { scope: v.string(), response: v.any() },
   returns: v.number(),
   handler: async (ctx, args) => {
     let count = 0;
     for (const record of extractAgentPhoneRecords(args.response)) {
-      if (await upsertCall(ctx, normalizeCall(record))) {
+      if (await upsertCall(ctx, args.scope, normalizeCall(record))) {
         count += 1;
       }
     }
@@ -114,277 +118,293 @@ export const upsertCallsFromResponse = internalMutation({
 });
 
 export const upsertCallTranscript = internalMutation({
-  args: {
-    callId: v.string(),
-    response: json,
-  },
-  returns: v.string(),
+  args: { scope: v.string(), callId: v.string(), response: v.any() },
+  returns: v.null(),
   handler: async (ctx, args) => {
-    const record = firstRecord(args.response);
-    const transcriptId =
-      providerId(record, ["transcript_id", "transcriptId", "id"]) ??
-      `call:${args.callId}:latest`;
     const now = Date.now();
-    const row = {
-      transcriptId,
+    const existing = await ctx.db
+      .query("callTranscripts")
+      .withIndex("by_scope_and_call_id", (q) =>
+        q.eq("scope", args.scope).eq("callId", args.callId),
+      )
+      .unique();
+    const value = {
+      scope: args.scope,
       callId: args.callId,
-      text:
-        asString(record.text) ??
-        asString(record.transcript) ??
-        asString(record.content),
       payload: args.response,
       syncedAt: now,
       updatedAt: now,
     };
-    const existing = await ctx.db
-      .query("callTranscripts")
-      .withIndex("by_transcriptId", (q) => q.eq("transcriptId", transcriptId))
-      .unique();
     if (existing) {
-      await ctx.db.patch(existing._id, stripUndefined(row));
+      await ctx.db.replace("callTranscripts", existing._id, value);
     } else {
-      await ctx.db.insert("callTranscripts", stripUndefined(row));
+      await ctx.db.insert("callTranscripts", value);
     }
-    return transcriptId;
+    return null;
   },
 });
 
 export const upsertCallRecording = internalMutation({
-  args: {
-    callId: v.string(),
-    response: json,
-  },
-  returns: v.string(),
+  args: { scope: v.string(), callId: v.string(), response: v.any() },
+  returns: v.null(),
   handler: async (ctx, args) => {
-    const record = firstRecord(args.response);
-    const recordingId =
-      providerId(record, ["recording_id", "recordingId", "id"]) ??
-      `call:${args.callId}:latest`;
     const now = Date.now();
-    const row = {
-      recordingId,
+    const record = asRecord(args.response);
+    const existing = await ctx.db
+      .query("callRecordings")
+      .withIndex("by_scope_and_call_id", (q) =>
+        q.eq("scope", args.scope).eq("callId", args.callId),
+      )
+      .unique();
+    const value = stripUndefined({
+      scope: args.scope,
       callId: args.callId,
-      url: asString(record.url) ?? asString(record.recording_url),
+      url:
+        asString(record.url) ??
+        asString(record.recordingUrl) ??
+        asString(record.recording_url),
       payload: args.response,
       syncedAt: now,
       updatedAt: now,
-    };
-    const existing = await ctx.db
-      .query("callRecordings")
-      .withIndex("by_recordingId", (q) => q.eq("recordingId", recordingId))
-      .unique();
+    });
     if (existing) {
-      await ctx.db.patch(existing._id, stripUndefined(row));
+      await ctx.db.replace("callRecordings", existing._id, value);
     } else {
-      await ctx.db.insert("callRecordings", stripUndefined(row));
+      await ctx.db.insert("callRecordings", value);
     }
-    return recordingId;
+    return null;
   },
 });
 
 export const listAgents = query({
   args: resourceListArgs,
-  returns: v.array(json),
+  returns: v.array(schema.tables.agents.validator),
   handler: async (ctx, args) =>
-    stripSystemFields(
+    withoutSystemFields(
       await ctx.db
         .query("agents")
-        .withIndex("by_agentId")
-        .take(limit(args.limit)),
+        .withIndex("by_scope_and_agent_id", (q) => q.eq("scope", args.scope))
+        .take(normalizeLimit(args.limit)),
     ),
 });
 
 export const getAgent = query({
-  args: { agentId: v.string() },
-  returns: v.union(json, v.null()),
+  args: { scope: v.string(), agentId: v.string() },
+  returns: v.union(schema.tables.agents.validator, v.null()),
   handler: async (ctx, args) => {
     const row = await ctx.db
       .query("agents")
-      .withIndex("by_agentId", (q) => q.eq("agentId", args.agentId))
+      .withIndex("by_scope_and_agent_id", (q) =>
+        q.eq("scope", args.scope).eq("agentId", args.agentId),
+      )
       .unique();
-    return row ? stripSystemField(row) : null;
+    return row ? withoutSystemFields([row])[0] : null;
   },
 });
 
 export const listNumbers = query({
   args: resourceListArgs,
-  returns: v.array(json),
+  returns: v.array(schema.tables.numbers.validator),
   handler: async (ctx, args) =>
-    stripSystemFields(
+    withoutSystemFields(
       await ctx.db
         .query("numbers")
-        .withIndex("by_numberId")
-        .take(limit(args.limit)),
+        .withIndex("by_scope_and_number_id", (q) => q.eq("scope", args.scope))
+        .take(normalizeLimit(args.limit)),
     ),
 });
 
 export const getNumber = query({
-  args: { numberId: v.string() },
-  returns: v.union(json, v.null()),
+  args: { scope: v.string(), numberId: v.string() },
+  returns: v.union(schema.tables.numbers.validator, v.null()),
   handler: async (ctx, args) => {
     const row = await ctx.db
       .query("numbers")
-      .withIndex("by_numberId", (q) => q.eq("numberId", args.numberId))
+      .withIndex("by_scope_and_number_id", (q) =>
+        q.eq("scope", args.scope).eq("numberId", args.numberId),
+      )
       .unique();
-    return row ? stripSystemField(row) : null;
+    return row ? withoutSystemFields([row])[0] : null;
   },
 });
 
 export const listConversations = query({
   args: {
+    ...resourceListArgs,
     agentId: v.optional(v.string()),
     numberId: v.optional(v.string()),
     counterparty: v.optional(v.string()),
-    ...resourceListArgs,
   },
-  returns: v.array(json),
+  returns: v.array(schema.tables.conversations.validator),
   handler: async (ctx, args) => {
+    const limit = normalizeLimit(args.limit);
     if (args.agentId) {
-      return stripSystemFields(
+      return withoutSystemFields(
         await ctx.db
           .query("conversations")
-          .withIndex("by_agent", (q) => q.eq("agentId", args.agentId))
+          .withIndex("by_scope_and_agent_id", (q) =>
+            q.eq("scope", args.scope).eq("agentId", args.agentId),
+          )
           .order("desc")
-          .take(limit(args.limit)),
+          .take(limit),
       );
     }
     if (args.numberId) {
-      return stripSystemFields(
+      return withoutSystemFields(
         await ctx.db
           .query("conversations")
-          .withIndex("by_number", (q) => q.eq("numberId", args.numberId))
+          .withIndex("by_scope_and_number_id", (q) =>
+            q.eq("scope", args.scope).eq("numberId", args.numberId),
+          )
           .order("desc")
-          .take(limit(args.limit)),
+          .take(limit),
       );
     }
     if (args.counterparty) {
-      return stripSystemFields(
+      return withoutSystemFields(
         await ctx.db
           .query("conversations")
-          .withIndex("by_counterparty", (q) =>
-            q.eq("counterparty", args.counterparty),
+          .withIndex("by_scope_and_counterparty", (q) =>
+            q.eq("scope", args.scope).eq("counterparty", args.counterparty),
           )
           .order("desc")
-          .take(limit(args.limit)),
+          .take(limit),
       );
     }
-    return stripSystemFields(
+    return withoutSystemFields(
       await ctx.db
         .query("conversations")
-        .withIndex("by_lastActivity")
+        .withIndex("by_scope_and_last_activity_at", (q) =>
+          q.eq("scope", args.scope),
+        )
         .order("desc")
-        .take(limit(args.limit)),
+        .take(limit),
     );
   },
 });
 
 export const getConversation = query({
-  args: { conversationId: v.string() },
-  returns: v.union(json, v.null()),
+  args: { scope: v.string(), conversationId: v.string() },
+  returns: v.union(schema.tables.conversations.validator, v.null()),
   handler: async (ctx, args) => {
     const row = await ctx.db
       .query("conversations")
-      .withIndex("by_conversationId", (q) =>
-        q.eq("conversationId", args.conversationId),
+      .withIndex("by_scope_and_conversation_id", (q) =>
+        q.eq("scope", args.scope).eq("conversationId", args.conversationId),
       )
       .unique();
-    return row ? stripSystemField(row) : null;
+    return row ? withoutSystemFields([row])[0] : null;
   },
 });
 
 export const listMessagesByConversation = query({
-  args: { conversationId: v.string(), ...resourceListArgs },
-  returns: v.array(json),
+  args: { ...resourceListArgs, conversationId: v.string() },
+  returns: v.array(schema.tables.messages.validator),
   handler: async (ctx, args) =>
-    stripSystemFields(
+    withoutSystemFields(
       await ctx.db
         .query("messages")
-        .withIndex("by_conversation", (q) =>
-          q.eq("conversationId", args.conversationId),
+        .withIndex("by_scope_and_conversation_id", (q) =>
+          q.eq("scope", args.scope).eq("conversationId", args.conversationId),
         )
         .order("desc")
-        .take(limit(args.limit)),
+        .take(normalizeLimit(args.limit)),
     ),
 });
 
 export const listMessagesByAgent = query({
-  args: { agentId: v.string(), ...resourceListArgs },
-  returns: v.array(json),
+  args: { ...resourceListArgs, agentId: v.string() },
+  returns: v.array(schema.tables.messages.validator),
   handler: async (ctx, args) =>
-    stripSystemFields(
+    withoutSystemFields(
       await ctx.db
         .query("messages")
-        .withIndex("by_agent", (q) => q.eq("agentId", args.agentId))
+        .withIndex("by_scope_and_agent_id", (q) =>
+          q.eq("scope", args.scope).eq("agentId", args.agentId),
+        )
         .order("desc")
-        .take(limit(args.limit)),
+        .take(normalizeLimit(args.limit)),
     ),
 });
 
 export const listMessagesByNumber = query({
-  args: { numberId: v.string(), ...resourceListArgs },
-  returns: v.array(json),
+  args: { ...resourceListArgs, numberId: v.string() },
+  returns: v.array(schema.tables.messages.validator),
   handler: async (ctx, args) =>
-    stripSystemFields(
+    withoutSystemFields(
       await ctx.db
         .query("messages")
-        .withIndex("by_number", (q) => q.eq("numberId", args.numberId))
+        .withIndex("by_scope_and_number_id", (q) =>
+          q.eq("scope", args.scope).eq("numberId", args.numberId),
+        )
         .order("desc")
-        .take(limit(args.limit)),
+        .take(normalizeLimit(args.limit)),
     ),
 });
 
 export const listMessagesByCounterparty = query({
-  args: { counterparty: v.string(), ...resourceListArgs },
-  returns: v.array(json),
+  args: { ...resourceListArgs, counterparty: v.string() },
+  returns: v.array(schema.tables.messages.validator),
   handler: async (ctx, args) =>
-    stripSystemFields(
+    withoutSystemFields(
       await ctx.db
         .query("messages")
-        .withIndex("by_counterparty", (q) =>
-          q.eq("counterparty", args.counterparty),
+        .withIndex("by_scope_and_counterparty", (q) =>
+          q.eq("scope", args.scope).eq("counterparty", args.counterparty),
         )
         .order("desc")
-        .take(limit(args.limit)),
+        .take(normalizeLimit(args.limit)),
     ),
 });
 
 export const listCallsByAgent = query({
-  args: { agentId: v.string(), ...resourceListArgs },
-  returns: v.array(json),
+  args: { ...resourceListArgs, agentId: v.string() },
+  returns: v.array(schema.tables.calls.validator),
   handler: async (ctx, args) =>
-    stripSystemFields(
+    withoutSystemFields(
       await ctx.db
         .query("calls")
-        .withIndex("by_agent", (q) => q.eq("agentId", args.agentId))
+        .withIndex("by_scope_and_agent_id", (q) =>
+          q.eq("scope", args.scope).eq("agentId", args.agentId),
+        )
         .order("desc")
-        .take(limit(args.limit)),
+        .take(normalizeLimit(args.limit)),
     ),
 });
 
 export const listCallsByNumber = query({
-  args: { numberId: v.string(), ...resourceListArgs },
-  returns: v.array(json),
+  args: { ...resourceListArgs, numberId: v.string() },
+  returns: v.array(schema.tables.calls.validator),
   handler: async (ctx, args) =>
-    stripSystemFields(
+    withoutSystemFields(
       await ctx.db
         .query("calls")
-        .withIndex("by_number", (q) => q.eq("numberId", args.numberId))
+        .withIndex("by_scope_and_number_id", (q) =>
+          q.eq("scope", args.scope).eq("numberId", args.numberId),
+        )
         .order("desc")
-        .take(limit(args.limit)),
+        .take(normalizeLimit(args.limit)),
     ),
 });
 
 export const getLatestConversationState = query({
   args: {
+    scope: v.string(),
     conversationId: v.string(),
     messageLimit: v.optional(v.number()),
   },
-  returns: v.union(json, v.null()),
+  returns: v.union(
+    v.object({
+      conversation: schema.tables.conversations.validator,
+      messages: v.array(schema.tables.messages.validator),
+    }),
+    v.null(),
+  ),
   handler: async (ctx, args) => {
     const conversation = await ctx.db
       .query("conversations")
-      .withIndex("by_conversationId", (q) =>
-        q.eq("conversationId", args.conversationId),
+      .withIndex("by_scope_and_conversation_id", (q) =>
+        q.eq("scope", args.scope).eq("conversationId", args.conversationId),
       )
       .unique();
     if (!conversation) {
@@ -392,77 +412,84 @@ export const getLatestConversationState = query({
     }
     const messages = await ctx.db
       .query("messages")
-      .withIndex("by_conversation", (q) =>
-        q.eq("conversationId", args.conversationId),
+      .withIndex("by_scope_and_conversation_id", (q) =>
+        q.eq("scope", args.scope).eq("conversationId", args.conversationId),
       )
       .order("desc")
-      .take(limit(args.messageLimit ?? 20));
+      .take(normalizeLimit(args.messageLimit ?? 20));
     return {
-      conversation: stripSystemField(conversation),
-      messages: stripSystemFields(messages),
+      conversation: withoutSystemFields([conversation])[0]!,
+      messages: withoutSystemFields(messages),
     };
   },
 });
 
 export const getCallTranscript = query({
-  args: { callId: v.string() },
-  returns: v.union(json, v.null()),
+  args: { scope: v.string(), callId: v.string() },
+  returns: v.union(schema.tables.callTranscripts.validator, v.null()),
   handler: async (ctx, args) => {
     const row = await ctx.db
       .query("callTranscripts")
-      .withIndex("by_call", (q) => q.eq("callId", args.callId))
-      .first();
-    return row ? stripSystemField(row) : null;
+      .withIndex("by_scope_and_call_id", (q) =>
+        q.eq("scope", args.scope).eq("callId", args.callId),
+      )
+      .unique();
+    return row ? withoutSystemFields([row])[0] : null;
   },
 });
 
 export const getCallRecording = query({
-  args: { callId: v.string() },
-  returns: v.union(json, v.null()),
+  args: { scope: v.string(), callId: v.string() },
+  returns: v.union(schema.tables.callRecordings.validator, v.null()),
   handler: async (ctx, args) => {
     const row = await ctx.db
       .query("callRecordings")
-      .withIndex("by_call", (q) => q.eq("callId", args.callId))
-      .first();
-    return row ? stripSystemField(row) : null;
+      .withIndex("by_scope_and_call_id", (q) =>
+        q.eq("scope", args.scope).eq("callId", args.callId),
+      )
+      .unique();
+    return row ? withoutSystemFields([row])[0] : null;
   },
 });
 
-async function upsertAgent(ctx: any, record: Record<string, unknown>) {
-  const agentId = record.agentId ?? providerId(record, ["agent_id", "agentId", "id"]);
-  if (typeof agentId !== "string") {
-    return false;
-  }
+async function upsertAgent(
+  ctx: MutationCtx,
+  scope: string,
+  record: Record<string, unknown>,
+) {
+  const agentId = providerId(record, ["agent_id", "agentId", "id"]);
+  if (!agentId) return false;
   const now = Date.now();
-  const row = {
+  const value = stripUndefined({
+    scope,
     agentId,
     name: asString(record.name),
     status: asString(record.status),
-    metadata: record.metadata,
     payload: record.payload ?? record,
     syncedAt: now,
     updatedAt: now,
-  };
+  });
   const existing = await ctx.db
     .query("agents")
-    .withIndex("by_agentId", (q: any) => q.eq("agentId", agentId))
+    .withIndex("by_scope_and_agent_id", (q) =>
+      q.eq("scope", scope).eq("agentId", agentId),
+    )
     .unique();
-  if (existing) {
-    await ctx.db.patch(existing._id, stripUndefined(row));
-  } else {
-    await ctx.db.insert("agents", stripUndefined(row));
-  }
+  if (existing) await ctx.db.replace("agents", existing._id, value);
+  else await ctx.db.insert("agents", value);
   return true;
 }
 
-async function upsertNumber(ctx: any, record: Record<string, unknown>) {
-  const numberId =
-    record.numberId ?? providerId(record, ["number_id", "numberId", "id", "sid"]);
-  if (typeof numberId !== "string") {
-    return false;
-  }
+async function upsertNumber(
+  ctx: MutationCtx,
+  scope: string,
+  record: Record<string, unknown>,
+) {
+  const numberId = providerId(record, ["number_id", "numberId", "id", "sid"]);
+  if (!numberId) return false;
   const now = Date.now();
-  const row = {
+  const value = stripUndefined({
+    scope,
     numberId,
     agentId: asString(record.agentId) ?? asString(record.agent_id),
     phoneNumber:
@@ -473,75 +500,77 @@ async function upsertNumber(ctx: any, record: Record<string, unknown>) {
     payload: record.payload ?? record,
     syncedAt: now,
     updatedAt: now,
-  };
+  });
   const existing = await ctx.db
     .query("numbers")
-    .withIndex("by_numberId", (q: any) => q.eq("numberId", numberId))
+    .withIndex("by_scope_and_number_id", (q) =>
+      q.eq("scope", scope).eq("numberId", numberId),
+    )
     .unique();
-  if (existing) {
-    await ctx.db.patch(existing._id, stripUndefined(row));
-  } else {
-    await ctx.db.insert("numbers", stripUndefined(row));
-  }
+  if (existing) await ctx.db.replace("numbers", existing._id, value);
+  else await ctx.db.insert("numbers", value);
   return true;
 }
 
-async function upsertConversation(ctx: any, record: Record<string, unknown>) {
-  const conversationId =
-    record.conversationId ??
-    providerId(record, ["conversation_id", "conversationId", "id"]);
-  if (typeof conversationId !== "string") {
-    return false;
-  }
+async function upsertConversation(
+  ctx: MutationCtx,
+  scope: string,
+  record: Record<string, unknown>,
+) {
+  const conversationId = providerId(record, [
+    "conversation_id",
+    "conversationId",
+    "id",
+  ]);
+  if (!conversationId) return false;
   const now = Date.now();
-  const lastActivityAt =
-    asNumber(record.lastActivityAt) ??
-    parseTimestamp(asString(record.last_activity_at) ?? asString(record.updated_at)) ??
-    now;
-  const row = {
+  const value = stripUndefined({
+    scope,
     conversationId,
     agentId: asString(record.agentId) ?? asString(record.agent_id),
     numberId: asString(record.numberId) ?? asString(record.number_id),
     counterparty: asString(record.counterparty),
     status: asString(record.status),
-    archived: asBoolean(record.archived),
-    labels: asStringArray(record.labels ?? record.tags),
-    metadata: record.metadata,
     lastMessageId:
       asString(record.lastMessageId) ?? asString(record.last_message_id),
     lastMessageText:
       asString(record.lastMessageText) ?? asString(record.last_message_text),
-    lastDirection: asString(record.lastDirection),
-    lastActivityAt,
+    lastDirection:
+      asString(record.lastDirection) ?? asString(record.last_direction),
+    lastActivityAt:
+      asNumber(record.lastActivityAt) ??
+      parseTimestamp(
+        asString(record.last_activity_at) ?? asString(record.updated_at),
+      ) ??
+      now,
     payload: record.payload ?? record,
     syncedAt: now,
     updatedAt: now,
-  };
+  });
   const existing = await ctx.db
     .query("conversations")
-    .withIndex("by_conversationId", (q: any) =>
-      q.eq("conversationId", conversationId),
+    .withIndex("by_scope_and_conversation_id", (q) =>
+      q.eq("scope", scope).eq("conversationId", conversationId),
     )
     .unique();
-  if (existing) {
-    await ctx.db.patch(existing._id, stripUndefined(row));
-  } else {
-    await ctx.db.insert("conversations", stripUndefined(row));
-  }
+  if (existing) await ctx.db.replace("conversations", existing._id, value);
+  else await ctx.db.insert("conversations", value);
   return true;
 }
 
-async function upsertMessage(ctx: any, record: Record<string, unknown>) {
-  const messageId =
-    record.messageId ?? providerId(record, ["message_id", "messageId", "id"]);
-  if (typeof messageId !== "string") {
-    return false;
-  }
+async function upsertMessage(
+  ctx: MutationCtx,
+  scope: string,
+  record: Record<string, unknown>,
+) {
+  const messageId = providerId(record, ["message_id", "messageId", "id"]);
+  if (!messageId) return false;
   const now = Date.now();
   const direction = asString(record.direction);
-  const from = asString(record.from);
-  const to = asString(record.to);
-  const row = {
+  const from = asString(record.from) ?? asString(record.from_number);
+  const to = asString(record.to) ?? asString(record.to_number);
+  const value = stripUndefined({
+    scope,
     messageId,
     conversationId:
       asString(record.conversationId) ?? asString(record.conversation_id),
@@ -552,45 +581,54 @@ async function upsertMessage(ctx: any, record: Record<string, unknown>) {
     direction,
     from,
     to,
-    counterparty: asString(record.counterparty) ?? counterpartyFor({ direction, from, to }),
-    body: asString(record.body),
-    text: asString(record.text) ?? asString(record.body),
+    counterparty:
+      asString(record.counterparty) ?? counterpartyFor({ direction, from, to }),
+    body:
+      asString(record.body) ??
+      asString(record.text) ??
+      asString(record.message),
     status: asString(record.status),
     timestamp:
       asNumber(record.timestamp) ??
-      parseTimestamp(asString(record.timestamp) ?? asString(record.created_at)) ??
+      parseTimestamp(
+        asString(record.timestamp) ?? asString(record.created_at),
+      ) ??
       now,
-    metadata: record.metadata,
     payload: record.payload ?? record,
     syncedAt: now,
     updatedAt: now,
-  };
+  });
   const existing = await ctx.db
     .query("messages")
-    .withIndex("by_messageId", (q: any) => q.eq("messageId", messageId))
+    .withIndex("by_scope_and_message_id", (q) =>
+      q.eq("scope", scope).eq("messageId", messageId),
+    )
     .unique();
-  if (existing) {
-    await ctx.db.patch(existing._id, stripUndefined(row));
-  } else {
-    await ctx.db.insert("messages", stripUndefined(row));
-  }
+  if (existing) await ctx.db.replace("messages", existing._id, value);
+  else await ctx.db.insert("messages", value);
   return true;
 }
 
-async function upsertCall(ctx: any, record: Record<string, unknown>) {
-  const callId = record.callId ?? providerId(record, ["call_id", "callId", "id"]);
-  if (typeof callId !== "string") {
-    return false;
-  }
+async function upsertCall(
+  ctx: MutationCtx,
+  scope: string,
+  record: Record<string, unknown>,
+) {
+  const callId = providerId(record, ["call_id", "callId", "id"]);
+  if (!callId) return false;
   const now = Date.now();
-  const row = {
+  const value = stripUndefined({
+    scope,
     callId,
     agentId: asString(record.agentId) ?? asString(record.agent_id),
-    numberId: asString(record.numberId) ?? asString(record.number_id),
+    numberId:
+      asString(record.numberId) ??
+      asString(record.number_id) ??
+      asString(record.phoneNumberId),
     conversationId:
       asString(record.conversationId) ?? asString(record.conversation_id),
-    from: asString(record.from),
-    to: asString(record.to),
+    from: asString(record.from) ?? asString(record.fromNumber),
+    to: asString(record.to) ?? asString(record.toNumber),
     status: asString(record.status),
     direction: asString(record.direction),
     startedAt:
@@ -601,20 +639,18 @@ async function upsertCall(ctx: any, record: Record<string, unknown>) {
       parseTimestamp(asString(record.ended_at) ?? asString(record.endedAt)),
     durationSeconds:
       asNumber(record.durationSeconds) ?? asNumber(record.duration_seconds),
-    metadata: record.metadata,
     payload: record.payload ?? record,
     syncedAt: now,
     updatedAt: now,
-  };
+  });
   const existing = await ctx.db
     .query("calls")
-    .withIndex("by_callId", (q: any) => q.eq("callId", callId))
+    .withIndex("by_scope_and_call_id", (q) =>
+      q.eq("scope", scope).eq("callId", callId),
+    )
     .unique();
-  if (existing) {
-    await ctx.db.patch(existing._id, stripUndefined(row));
-  } else {
-    await ctx.db.insert("calls", stripUndefined(row));
-  }
+  if (existing) await ctx.db.replace("calls", existing._id, value);
+  else await ctx.db.insert("calls", value);
   return true;
 }
 
@@ -651,33 +687,29 @@ function normalizeMessage(record: Record<string, unknown>) {
 }
 
 function normalizeCall(record: Record<string, unknown>) {
-  return {
-    ...record,
-    callId: providerId(record, ["call_id", "callId", "id"]),
-  };
+  return { ...record, callId: providerId(record, ["call_id", "callId", "id"]) };
 }
 
-function firstRecord(response: unknown) {
-  return extractAgentPhoneRecords(response)[0] ?? {};
+function withoutSystemFields<T extends { _id: unknown; _creationTime: number }>(
+  rows: T[],
+) {
+  return rows.map(
+    ({ _id: _ignoredId, _creationTime: _ignoredTime, ...row }) => row,
+  );
 }
 
-function stripSystemFields(rows: Array<Record<string, unknown>>) {
-  return rows.map(stripSystemField);
-}
-
-function stripSystemField(row: Record<string, unknown>) {
-  const { _id, _creationTime, ...rest } = row;
-  return rest;
-}
-
-function stripUndefined<T extends Record<string, unknown>>(value: T): T {
+function stripUndefined<T extends Record<string, unknown>>(value: T) {
   return Object.fromEntries(
     Object.entries(value).filter(([, entry]) => entry !== undefined),
   ) as T;
 }
 
-function limit(value: number | undefined) {
-  return Math.min(value ?? 50, 200);
+function normalizeLimit(value: number | undefined) {
+  if (value === undefined) return 50;
+  if (!Number.isInteger(value) || value < 1 || value > 100) {
+    throw new Error("limit must be an integer between 1 and 100");
+  }
+  return value;
 }
 
 function asString(value: unknown) {
@@ -685,15 +717,13 @@ function asString(value: unknown) {
 }
 
 function asNumber(value: unknown) {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
-
-function asBoolean(value: unknown) {
-  return typeof value === "boolean" ? value : undefined;
-}
-
-function asStringArray(value: unknown) {
-  return Array.isArray(value) && value.every((entry) => typeof entry === "string")
+  return typeof value === "number" && Number.isFinite(value)
     ? value
     : undefined;
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
 }

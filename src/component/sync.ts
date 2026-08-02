@@ -1,158 +1,160 @@
-import { action } from "./_generated/server.js";
-import { internal } from "./_generated/api.js";
 import { v } from "convex/values";
+import { internal } from "./_generated/api.js";
+import { action } from "./_generated/server.js";
+import { agentPhoneRequest } from "./request.js";
 
-import { callAgentPhoneSdk } from "./lib/sdk.js";
-import { extractWebhookSecret } from "./lib/webhookPayload.js";
-import { json, paginationArgs, stripUndefined } from "./lib/validators.js";
+const connectionArgs = {
+  token: v.string(),
+  scope: v.string(),
+  subAccountId: v.optional(v.string()),
+  baseUrl: v.optional(v.string()),
+};
+
+const paginationArgs = {
+  limit: v.optional(v.number()),
+  offset: v.optional(v.number()),
+};
 
 const syncResult = v.object({
   synced: v.number(),
-  response: v.optional(json),
-  skipped: v.optional(v.string()),
+  response: v.any(),
 });
 
-export const syncAgents = action({
-  args: paginationArgs,
+type SyncOutput = { synced: number; response: unknown };
+
+export const agents = action({
+  args: { ...connectionArgs, ...paginationArgs },
   returns: syncResult,
-  handler: async (ctx, args) => {
-    const response = await callAgentPhoneSdk(
-      "agents",
-      "listAgents",
-      stripUndefined(args),
-    );
-    const synced = await ctx.runMutation(
+  handler: async (ctx, args): Promise<SyncOutput> => {
+    const response = await get(args, "agents", pagination(args));
+    const synced: number = await ctx.runMutation(
       internal.resources.upsertAgentsFromResponse,
-      { response },
+      { scope: args.scope, response },
     );
     return { synced, response };
   },
 });
 
-export const syncNumbers = action({
-  args: paginationArgs,
+export const numbers = action({
+  args: { ...connectionArgs, ...paginationArgs },
   returns: syncResult,
-  handler: async (ctx, args) => {
-    const response = await callAgentPhoneSdk(
-      "numbers",
-      "listNumbers",
-      stripUndefined(args),
-    );
-    const synced = await ctx.runMutation(
+  handler: async (ctx, args): Promise<SyncOutput> => {
+    const response = await get(args, "numbers", pagination(args));
+    const synced: number = await ctx.runMutation(
       internal.resources.upsertNumbersFromResponse,
-      { response },
+      { scope: args.scope, response },
     );
     return { synced, response };
   },
 });
 
-export const syncRecentConversations = action({
+export const conversations = action({
   args: {
+    ...connectionArgs,
     ...paginationArgs,
-    agent_id: v.optional(v.string()),
-    number_id: v.optional(v.string()),
+    agentId: v.optional(v.string()),
+    numberId: v.optional(v.string()),
   },
   returns: syncResult,
-  handler: async (ctx, args) => {
-    const response = await callAgentPhoneSdk(
-      "conversations",
-      "listConversations",
-      stripUndefined(args),
-    );
-    const synced = await ctx.runMutation(
-      internal.resources.upsertConversationsFromResponse,
-      { response },
-    );
-    return { synced, response };
-  },
-});
-
-export const syncRecentMessages = action({
-  args: {
-    ...paginationArgs,
-    conversation_id: v.optional(v.string()),
-    number_id: v.optional(v.string()),
-  },
-  returns: syncResult,
-  handler: async (ctx, args) => {
-    if (!args.conversation_id && !args.number_id) {
-      return {
-        synced: 0,
-        skipped:
-          "syncRecentMessages requires either conversation_id or number_id.",
-      };
-    }
-    const response = args.conversation_id
-      ? await callAgentPhoneSdk(
-          "conversations",
-          "getConversationMessages",
-          stripUndefined(args),
-        )
-      : await callAgentPhoneSdk("numbers", "getMessages", stripUndefined(args));
-    const synced = await ctx.runMutation(
-      internal.resources.upsertMessagesFromResponse,
-      { response },
-    );
-    return { synced, response };
-  },
-});
-
-export const syncRecentCalls = action({
-  args: {
-    ...paginationArgs,
-    agent_id: v.optional(v.string()),
-    number_id: v.optional(v.string()),
-  },
-  returns: syncResult,
-  handler: async (ctx, args) => {
-    const response = args.number_id
-      ? await callAgentPhoneSdk(
-          "calls",
-          "listCallsForNumber",
-          stripUndefined(args),
-        )
-      : await callAgentPhoneSdk("calls", "listCalls", stripUndefined(args));
-    const synced = await ctx.runMutation(
-      internal.resources.upsertCallsFromResponse,
-      { response },
-    );
-    return { synced, response };
-  },
-});
-
-export const reconcileWebhookConfig = action({
-  args: {
-    agent_id: v.optional(v.string()),
-  },
-  returns: syncResult,
-  handler: async (ctx, args) => {
-    const response = args.agent_id
-      ? await callAgentPhoneSdk("agentWebhooks", "getAgentWebhook", args)
-      : await callAgentPhoneSdk("webhooks", "getWebhook");
-    await ctx.runMutation(internal.state.upsertWebhookConfig, {
-      scope: args.agent_id ? "agent" : "project",
-      agentId: args.agent_id,
-      url: urlFromResponse(response) ?? "",
-      secret: extractWebhookSecret(response),
-      status: statusFromResponse(response),
-      providerResponse: response,
+  handler: async (ctx, args): Promise<SyncOutput> => {
+    const response = await get(args, "conversations", {
+      ...pagination(args),
+      ...(args.agentId && { agent_id: args.agentId }),
+      ...(args.numberId && { number_id: args.numberId }),
     });
-    return { synced: 1, response };
+    const synced: number = await ctx.runMutation(
+      internal.resources.upsertConversationsFromResponse,
+      { scope: args.scope, response },
+    );
+    return { synced, response };
   },
 });
 
-function urlFromResponse(response: unknown) {
-  if (!response || typeof response !== "object" || Array.isArray(response)) {
-    return undefined;
-  }
-  const value = (response as Record<string, unknown>).url;
-  return typeof value === "string" ? value : undefined;
+export const messages = action({
+  args: {
+    ...connectionArgs,
+    conversationId: v.optional(v.string()),
+    numberId: v.optional(v.string()),
+    limit: v.optional(v.number()),
+    before: v.optional(v.string()),
+    after: v.optional(v.string()),
+  },
+  returns: syncResult,
+  handler: async (ctx, args): Promise<SyncOutput> => {
+    if (Boolean(args.conversationId) === Boolean(args.numberId)) {
+      throw new Error("Provide exactly one of conversationId or numberId");
+    }
+    const parent = args.conversationId
+      ? `conversations/${encodeURIComponent(args.conversationId)}`
+      : `numbers/${encodeURIComponent(args.numberId!)}`;
+    const response = await get(args, `${parent}/messages`, {
+      ...(args.limit !== undefined && { limit: args.limit }),
+      ...(args.before && { before: args.before }),
+      ...(args.after && { after: args.after }),
+    });
+    const synced: number = await ctx.runMutation(
+      internal.resources.upsertMessagesFromResponse,
+      { scope: args.scope, response },
+    );
+    return { synced, response };
+  },
+});
+
+export const calls = action({
+  args: {
+    ...connectionArgs,
+    ...paginationArgs,
+    agentId: v.optional(v.string()),
+    numberId: v.optional(v.string()),
+    status: v.optional(v.string()),
+    direction: v.optional(v.string()),
+    search: v.optional(v.string()),
+  },
+  returns: syncResult,
+  handler: async (ctx, args): Promise<SyncOutput> => {
+    const path = args.numberId
+      ? `numbers/${encodeURIComponent(args.numberId)}/calls`
+      : args.agentId
+        ? `agents/${encodeURIComponent(args.agentId)}/calls`
+        : "calls";
+    const response = await get(args, path, {
+      ...pagination(args),
+      ...(args.status && { status: args.status }),
+      ...(args.direction && { direction: args.direction }),
+      ...(args.search && { search: args.search }),
+    });
+    const synced: number = await ctx.runMutation(
+      internal.resources.upsertCallsFromResponse,
+      { scope: args.scope, response },
+    );
+    return { synced, response };
+  },
+});
+
+type Connection = {
+  token: string;
+  subAccountId?: string;
+  baseUrl?: string;
+};
+
+async function get(
+  args: Connection,
+  path: string,
+  query?: Record<string, string | number | boolean | null>,
+) {
+  return await agentPhoneRequest({
+    token: args.token,
+    method: "GET",
+    path,
+    ...(query && { query }),
+    ...(args.subAccountId && { subAccountId: args.subAccountId }),
+    ...(args.baseUrl && { baseUrl: args.baseUrl }),
+  });
 }
 
-function statusFromResponse(response: unknown) {
-  if (!response || typeof response !== "object" || Array.isArray(response)) {
-    return undefined;
-  }
-  const value = (response as Record<string, unknown>).status;
-  return typeof value === "string" ? value : undefined;
+function pagination(args: { limit?: number; offset?: number }) {
+  return {
+    ...(args.limit !== undefined && { limit: args.limit }),
+    ...(args.offset !== undefined && { offset: args.offset }),
+  };
 }

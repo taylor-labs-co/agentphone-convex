@@ -1,4 +1,7 @@
-import type { NormalizedWebhookEvent } from "./webhookPayload.js";
+import type { Infer } from "convex/values";
+import { agentPhoneEventValidator } from "../validators.js";
+
+type AgentPhoneEvent = Infer<typeof agentPhoneEventValidator>;
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -45,90 +48,103 @@ export function providerId(record: unknown, keys: string[]) {
 }
 
 export function resourceSnapshotsFromWebhook(args: {
-  webhookId: string;
+  deliveryId: string;
   receivedAt: number;
-  normalized: NormalizedWebhookEvent;
-  payload: unknown;
+  event: AgentPhoneEvent;
 }): ResourceSnapshots {
-  const { normalized, payload, receivedAt, webhookId } = args;
-  const source = asRecord(payload);
-  const data = asRecord(source.data);
-  const timestamp = parseTimestamp(normalized.timestamp) ?? receivedAt;
+  const { event, receivedAt, deliveryId } = args;
+  const data = asRecord(event.data);
+  const timestamp = parseTimestamp(event.timestamp) ?? receivedAt;
+  const agentId = asString(event.agentId ?? undefined);
+  const conversationId = asString(data.conversationId ?? data.conversation_id);
+  const callId = asString(data.callId ?? data.call_id);
+  const numberId = asString(data.numberId ?? data.number_id);
+  const messageId = asString(data.messageId ?? data.message_id);
+  const direction = asString(data.direction);
+  const from = asString(data.from) ?? asString(data.fromNumber);
+  const to = asString(data.to) ?? asString(data.toNumber);
+  const text =
+    asString(data.message) ??
+    asString(data.text) ??
+    asString(data.body) ??
+    asString(data.transcript);
   const counterparty = counterpartyFor({
-    direction: normalized.direction,
-    from: normalized.from,
-    to: normalized.to,
+    direction,
+    from,
+    to,
   });
 
-  const agent = normalized.agentId
+  const agent = agentId
     ? {
-        agentId: normalized.agentId,
-        payload: pickPayload(data.agent ?? source.agent ?? payload),
+        agentId,
+        payload: pickPayload(data.agent ?? event),
       }
     : undefined;
 
-  const number = normalized.numberId
+  const number = numberId
     ? {
-        numberId: normalized.numberId,
-        agentId: normalized.agentId,
+        numberId,
+        agentId,
         phoneNumber:
           asString(data.phone_number) ??
           asString(data.phoneNumber) ??
           asString(data.number),
-        payload: pickPayload(data.number ?? source.number ?? payload),
+        payload: pickPayload(data.number ?? event),
       }
     : undefined;
 
-  const conversation = normalized.conversationId
+  const conversation = conversationId
     ? {
-        conversationId: normalized.conversationId,
-        agentId: normalized.agentId,
-        numberId: normalized.numberId,
+        conversationId,
+        agentId,
+        numberId,
         counterparty,
-        lastMessageId: normalized.messageId,
-        lastMessageText: normalized.text,
-        lastDirection: normalized.direction,
+        lastMessageId: messageId,
+        lastMessageText: text,
+        lastDirection: direction,
         lastActivityAt: timestamp,
-        payload: pickPayload(data.conversation ?? source.conversation ?? payload),
+        payload: pickPayload(data.conversation ?? event),
       }
     : undefined;
 
   const message =
-    normalized.messageId || normalized.event === "agent.message"
+    messageId || event.event === "agent.message"
       ? {
-          messageId: normalized.messageId ?? `webhook:${webhookId}`,
-          conversationId: normalized.conversationId,
-          agentId: normalized.agentId,
-          numberId: normalized.numberId,
-          callId: normalized.callId,
-          channel: normalized.channel,
-          direction: normalized.direction,
-          from: normalized.from,
-          to: normalized.to,
+          messageId: messageId ?? `webhook:${deliveryId}`,
+          conversationId,
+          agentId,
+          numberId,
+          callId,
+          channel: event.channel,
+          direction,
+          from,
+          to,
           counterparty,
-          body: normalized.text,
-          text: normalized.text,
+          body: text,
           timestamp,
-          payload: pickPayload(data.messageObject ?? data.message ?? data ?? payload),
+          payload: pickPayload(
+            data.messageObject ?? data.message ?? data ?? event,
+          ),
         }
       : undefined;
 
-  const call = normalized.callId
+  const call = callId
     ? {
-        callId: normalized.callId,
-        agentId: normalized.agentId,
-        numberId: normalized.numberId,
-        conversationId: normalized.conversationId,
-        from: normalized.from,
-        to: normalized.to,
+        callId,
+        agentId,
+        numberId,
+        conversationId,
+        from,
+        to,
         status: asString(data.status),
-        direction: normalized.direction,
-        endedAt:
-          normalized.event === "agent.call_ended" ? timestamp : undefined,
-        startedAt: parseTimestamp(asString(data.started_at) ?? asString(data.startedAt)),
+        direction,
+        endedAt: event.event === "agent.call_ended" ? timestamp : undefined,
+        startedAt: parseTimestamp(
+          asString(data.started_at) ?? asString(data.startedAt),
+        ),
         durationSeconds:
           asNumber(data.duration_seconds) ?? asNumber(data.durationSeconds),
-        payload: pickPayload(data.call ?? source.call ?? data ?? payload),
+        payload: pickPayload(data.call ?? data ?? event),
       }
     : undefined;
 
@@ -181,5 +197,7 @@ function asString(value: unknown) {
 }
 
 function asNumber(value: unknown) {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : undefined;
 }
