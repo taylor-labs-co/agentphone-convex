@@ -3,10 +3,13 @@
   "name": "AgentPhone",
   "theme": "luma",
   "logo": {
-    "light": "https://media.brand.dev/074f54d6-3e9d-4927-8e2b-5dd81953ab39.svg",
-    "dark": "https://media.brand.dev/074f54d6-3e9d-4927-8e2b-5dd81953ab39.svg"
+    "light": "/logo/light.svg",
+    "dark": "/logo/dark.svg"
   },
-  "favicon": "https://media.brand.dev/6569d224-0979-49e5-8d14-60785134bd2a.jpg",
+  "favicon": {
+    "light": "/favicon.svg",
+    "dark": "/favicon-dark.svg"
+  },
   "colors": {
     "primary": "#0d5835",
     "light": "#7cbca0",
