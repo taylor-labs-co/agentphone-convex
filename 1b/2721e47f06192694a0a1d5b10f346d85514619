@@ -1,0 +1,27 @@
+src/client/index.ts
+  s_afc7f786d95645::t_6b8cb0dd4f735e 53
+src/client/auth.ts
+  s_afc7f786d95645::t_6b8cb0dd4f735e 1-47
+example/convex/agentphone.ts
+  s_afc7f786d95645::t_6b8cb0dd4f735e 11,84,93
+README.md
+  s_afc7f786d95645::t_6b8cb0dd4f735e 60-84,220,226-228,231-232
+src/client/auth.test.ts
+  s_afc7f786d95645::t_6b8cb0dd4f735e 1-79
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "1b2721e47f06192694a0a1d5b10f346d85514619",
+  "prompts": {},
+  "sessions": {
+    "s_afc7f786d95645": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fbc09-2b63-7840-9643-49aff9df9bc2",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Evan Taylor <eltaylor1104@gmail.com>"
+    }
+  }
+}
