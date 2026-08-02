@@ -1,0 +1,476 @@
+---
+title: "Local Resource Mirrors — Reactive Convex Queries"
+sidebarTitle: "Local Resources"
+description: "Query reactive local mirrors of agents, numbers, conversations, messages, and calls stored in your Convex database by the agentphone-convex component."
+---
+
+The `AgentPhone` client maintains scoped, index-backed mirrors of every resource that flows through the component — agents, numbers, conversations, messages, calls, transcripts, and recordings. Because these mirrors live in your own Convex tables, you can read them from any query, mutation, or action context without an extra network round-trip to the AgentPhone API. All reads are index-backed, default to 50 records, and reject limits above 100.
+
+<Note>
+  Mirrors are kept current automatically by incoming webhooks, direct sends and calls, queued outbound work, transcript fetches, and explicit sync calls. You can also backfill them on demand using the [Sync API](/api/sync).
+</Note>
+
+---
+
+## Agents
+
+### `listLocalAgents`
+
+Returns all locally mirrored agents for the configured scope.
+
+```ts
+const agents = await agentphone.listLocalAgents(ctx, { limit: 25 });
+```
+
+**Parameters**
+
+<ParamField body="ctx" type="QueryCtx | MutationCtx | ActionCtx" required>
+  A Convex query, mutation, or action context.
+</ParamField>
+
+<ParamField body="limit" type="number">
+  Maximum number of agents to return. Defaults to `50`. Maximum is `100`.
+</ParamField>
+
+**Returns** `AgentPhoneAgent[]`
+
+---
+
+### `getLocalAgent`
+
+Looks up a single agent by its AgentPhone agent ID.
+
+```ts
+const agent = await agentphone.getLocalAgent(ctx, { agentId: "agt_abc123" });
+```
+
+**Parameters**
+
+<ParamField body="ctx" type="QueryCtx | MutationCtx | ActionCtx" required>
+  A Convex query, mutation, or action context.
+</ParamField>
+
+<ParamField body="agentId" type="string" required>
+  The AgentPhone agent ID to look up.
+</ParamField>
+
+**Returns** `AgentPhoneAgent | null`
+
+---
+
+## Numbers
+
+### `listLocalNumbers`
+
+Returns all locally mirrored phone numbers for the configured scope.
+
+```ts
+const numbers = await agentphone.listLocalNumbers(ctx, { limit: 10 });
+```
+
+**Parameters**
+
+<ParamField body="ctx" type="QueryCtx | MutationCtx | ActionCtx" required>
+  A Convex query, mutation, or action context.
+</ParamField>
+
+<ParamField body="limit" type="number">
+  Maximum number of numbers to return. Defaults to `50`. Maximum is `100`.
+</ParamField>
+
+**Returns** `AgentPhoneNumber[]`
+
+---
+
+### `getLocalNumber`
+
+Looks up a single phone number by its AgentPhone number ID.
+
+```ts
+const number = await agentphone.getLocalNumber(ctx, { numberId: "num_xyz789" });
+```
+
+**Parameters**
+
+<ParamField body="ctx" type="QueryCtx | MutationCtx | ActionCtx" required>
+  A Convex query, mutation, or action context.
+</ParamField>
+
+<ParamField body="numberId" type="string" required>
+  The AgentPhone number ID to look up.
+</ParamField>
+
+**Returns** `AgentPhoneNumber | null`
+
+---
+
+## Conversations
+
+### `listLocalConversations`
+
+Returns locally mirrored conversations, optionally filtered by agent, number, or counterparty. Results are ordered most-recent-activity first.
+
+```ts
+const conversations = await agentphone.listLocalConversations(ctx, {
+  agentId: "agt_abc123",
+  limit: 20,
+});
+```
+
+**Parameters**
+
+<ParamField body="ctx" type="QueryCtx | MutationCtx | ActionCtx" required>
+  A Convex query, mutation, or action context.
+</ParamField>
+
+<ParamField body="agentId" type="string">
+  Filter conversations to a specific agent.
+</ParamField>
+
+<ParamField body="numberId" type="string">
+  Filter conversations to a specific phone number.
+</ParamField>
+
+<ParamField body="counterparty" type="string">
+  Filter conversations to a specific counterparty phone number or identifier.
+</ParamField>
+
+<ParamField body="limit" type="number">
+  Maximum number of conversations to return. Defaults to `50`. Maximum is `100`.
+</ParamField>
+
+<Tip>
+  Providing `agentId`, `numberId`, or `counterparty` each routes to a dedicated index. Omitting all three uses the `by_scope_and_last_activity_at` index for a recency-ordered full list.
+</Tip>
+
+**Returns** `AgentPhoneConversation[]`
+
+---
+
+### `getLocalConversation`
+
+Looks up a single conversation by its AgentPhone conversation ID.
+
+```ts
+const conversation = await agentphone.getLocalConversation(ctx, {
+  conversationId: "conv_abc123",
+});
+```
+
+**Parameters**
+
+<ParamField body="ctx" type="QueryCtx | MutationCtx | ActionCtx" required>
+  A Convex query, mutation, or action context.
+</ParamField>
+
+<ParamField body="conversationId" type="string" required>
+  The AgentPhone conversation ID to look up.
+</ParamField>
+
+**Returns** `AgentPhoneConversation | null`
+
+---
+
+## Messages
+
+### `listLocalMessagesByConversation`
+
+Returns messages in a conversation, ordered most-recent first.
+
+```ts
+const messages = await agentphone.listLocalMessagesByConversation(ctx, {
+  conversationId: "conv_abc123",
+  limit: 30,
+});
+```
+
+**Parameters**
+
+<ParamField body="ctx" type="QueryCtx | MutationCtx | ActionCtx" required>
+  A Convex query, mutation, or action context.
+</ParamField>
+
+<ParamField body="conversationId" type="string" required>
+  The AgentPhone conversation ID.
+</ParamField>
+
+<ParamField body="limit" type="number">
+  Maximum number of messages to return. Defaults to `50`. Maximum is `100`.
+</ParamField>
+
+**Returns** `AgentPhoneMessage[]`
+
+---
+
+### `listLocalMessagesByAgent`
+
+Returns messages sent or received by a specific agent, ordered most-recent first.
+
+```ts
+const messages = await agentphone.listLocalMessagesByAgent(ctx, {
+  agentId: "agt_abc123",
+});
+```
+
+**Parameters**
+
+<ParamField body="ctx" type="QueryCtx | MutationCtx | ActionCtx" required>
+  A Convex query, mutation, or action context.
+</ParamField>
+
+<ParamField body="agentId" type="string" required>
+  The AgentPhone agent ID.
+</ParamField>
+
+<ParamField body="limit" type="number">
+  Maximum number of messages to return. Defaults to `50`. Maximum is `100`.
+</ParamField>
+
+**Returns** `AgentPhoneMessage[]`
+
+---
+
+### `listLocalMessagesByNumber`
+
+Returns messages associated with a phone number, ordered most-recent first.
+
+```ts
+const messages = await agentphone.listLocalMessagesByNumber(ctx, {
+  numberId: "num_xyz789",
+  limit: 50,
+});
+```
+
+**Parameters**
+
+<ParamField body="ctx" type="QueryCtx | MutationCtx | ActionCtx" required>
+  A Convex query, mutation, or action context.
+</ParamField>
+
+<ParamField body="numberId" type="string" required>
+  The AgentPhone number ID.
+</ParamField>
+
+<ParamField body="limit" type="number">
+  Maximum number of messages to return. Defaults to `50`. Maximum is `100`.
+</ParamField>
+
+**Returns** `AgentPhoneMessage[]`
+
+---
+
+### `listLocalMessagesByCounterparty`
+
+Returns messages associated with a counterparty phone number or identifier, ordered most-recent first.
+
+```ts
+const messages = await agentphone.listLocalMessagesByCounterparty(ctx, {
+  counterparty: "+15551234567",
+});
+```
+
+**Parameters**
+
+<ParamField body="ctx" type="QueryCtx | MutationCtx | ActionCtx" required>
+  A Convex query, mutation, or action context.
+</ParamField>
+
+<ParamField body="counterparty" type="string" required>
+  The counterparty phone number or identifier.
+</ParamField>
+
+<ParamField body="limit" type="number">
+  Maximum number of messages to return. Defaults to `50`. Maximum is `100`.
+</ParamField>
+
+**Returns** `AgentPhoneMessage[]`
+
+---
+
+## Calls
+
+### `listLocalCallsByAgent`
+
+Returns calls associated with a specific agent, ordered most-recent first.
+
+```ts
+const calls = await agentphone.listLocalCallsByAgent(ctx, {
+  agentId: "agt_abc123",
+  limit: 20,
+});
+```
+
+**Parameters**
+
+<ParamField body="ctx" type="QueryCtx | MutationCtx | ActionCtx" required>
+  A Convex query, mutation, or action context.
+</ParamField>
+
+<ParamField body="agentId" type="string" required>
+  The AgentPhone agent ID.
+</ParamField>
+
+<ParamField body="limit" type="number">
+  Maximum number of calls to return. Defaults to `50`. Maximum is `100`.
+</ParamField>
+
+**Returns** `AgentPhoneCall[]`
+
+---
+
+### `listLocalCallsByNumber`
+
+Returns calls associated with a phone number, ordered most-recent first.
+
+```ts
+const calls = await agentphone.listLocalCallsByNumber(ctx, {
+  numberId: "num_xyz789",
+  limit: 10,
+});
+```
+
+**Parameters**
+
+<ParamField body="ctx" type="QueryCtx | MutationCtx | ActionCtx" required>
+  A Convex query, mutation, or action context.
+</ParamField>
+
+<ParamField body="numberId" type="string" required>
+  The AgentPhone number ID.
+</ParamField>
+
+<ParamField body="limit" type="number">
+  Maximum number of calls to return. Defaults to `50`. Maximum is `100`.
+</ParamField>
+
+**Returns** `AgentPhoneCall[]`
+
+---
+
+## Transcripts and Recordings
+
+### `getLocalCallTranscript`
+
+Returns the locally mirrored transcript for a call if one has been fetched and stored.
+
+```ts
+const transcript = await agentphone.getLocalCallTranscript(ctx, {
+  callId: "call_abc123",
+});
+```
+
+**Parameters**
+
+<ParamField body="ctx" type="QueryCtx | MutationCtx | ActionCtx" required>
+  A Convex query, mutation, or action context.
+</ParamField>
+
+<ParamField body="callId" type="string" required>
+  The AgentPhone call ID.
+</ParamField>
+
+**Returns** `AgentPhoneCallTranscript | null`
+
+---
+
+### `getLocalCallRecording`
+
+Returns the locally mirrored recording metadata for a call if one has been fetched and stored.
+
+```ts
+const recording = await agentphone.getLocalCallRecording(ctx, {
+  callId: "call_abc123",
+});
+```
+
+**Parameters**
+
+<ParamField body="ctx" type="QueryCtx | MutationCtx | ActionCtx" required>
+  A Convex query, mutation, or action context.
+</ParamField>
+
+<ParamField body="callId" type="string" required>
+  The AgentPhone call ID.
+</ParamField>
+
+**Returns** `AgentPhoneCallRecording | null`
+
+---
+
+## Combined State
+
+### `getLatestConversationState`
+
+Returns a conversation and its most recent messages in a single read. Returns `null` if the conversation is not found locally.
+
+```ts
+export const conversationState = query({
+  args: { conversationId: v.string() },
+  returns: v.any(),
+  handler: async (ctx, args) => {
+    return await agentphone.getLatestConversationState(ctx, {
+      ...args,
+      messageLimit: 25,
+    });
+  },
+});
+```
+
+**Parameters**
+
+<ParamField body="ctx" type="QueryCtx | MutationCtx | ActionCtx" required>
+  A Convex query, mutation, or action context.
+</ParamField>
+
+<ParamField body="conversationId" type="string" required>
+  The AgentPhone conversation ID.
+</ParamField>
+
+<ParamField body="messageLimit" type="number">
+  Maximum number of recent messages to include. Defaults to `20`. Maximum is `100`.
+</ParamField>
+
+**Returns**
+
+```ts
+{
+  conversation: AgentPhoneConversation;
+  messages: AgentPhoneMessage[];
+} | null
+```
+
+<ResponseField name="conversation" type="AgentPhoneConversation">
+  The locally mirrored conversation record.
+</ResponseField>
+
+<ResponseField name="messages" type="AgentPhoneMessage[]">
+  The most recent messages in the conversation, ordered most-recent first.
+</ResponseField>
+
+---
+
+## Exported Validators
+
+The client exports a Convex validator for every mirrored resource type. Use these in your own query and mutation return type annotations.
+
+```ts
+import {
+  agentValidator,
+  numberValidator,
+  conversationValidator,
+  messageValidator,
+  callValidator,
+  callTranscriptValidator,
+  callRecordingValidator,
+} from "agentphone-convex";
+```
+
+| Export | Validates |
+|---|---|
+| `agentValidator` | `AgentPhoneAgent` |
+| `numberValidator` | `AgentPhoneNumber` |
+| `conversationValidator` | `AgentPhoneConversation` |
+| `messageValidator` | `AgentPhoneMessage` |
+| `callValidator` | `AgentPhoneCall` |
+| `callTranscriptValidator` | `AgentPhoneCallTranscript` |
+| `callRecordingValidator` | `AgentPhoneCallRecording` |

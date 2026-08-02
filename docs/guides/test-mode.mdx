@@ -1,0 +1,115 @@
+---
+title: "Testing the Component Without Provider Credentials"
+sidebarTitle: "Test Mode"
+description: "Skip live API calls and run the durable queue state machine in CI, integration tests, and local development without real AgentPhone credentials."
+---
+
+Test mode lets you run your entire messaging and call workflow — including the durable outbound queue, status transitions, and local mirror updates — without a real AgentPhone account or a valid API key. Instead of forwarding the request to the provider, the component records a `TestModeResult`, advances the request through its full status lifecycle, and returns immediately. Your application code sees the same interfaces it would in production.
+
+## What test mode does
+
+When test mode is active for a request:
+
+1. The provider HTTP call is **skipped entirely** — no network request is made and no API key is required.
+2. The durable queue and local state machine run normally. A queued request moves through `queued → sending → sent` just as it would in production.
+3. The call returns a `TestModeResult` instead of a real provider response, so you can assert on the result in tests.
+
+```ts
+interface TestModeResult {
+  testMode: true;
+  status: "skipped";
+  kind: "message" | "outbound_call" | "web_call";
+  args: JsonValue;
+}
+```
+
+## Three ways to enable test mode
+
+<Tabs>
+  <Tab title="Per-client">
+    Set `testMode: true` on the `AgentPhone` constructor to enable it for every request made through that client instance. This is the most convenient option for a dedicated test environment.
+
+    ```ts
+    import { AgentPhone } from "agentphone-convex";
+    import { components } from "./_generated/api.js";
+
+    export const agentphone = new AgentPhone(components.agentphone, {
+      testMode: true,
+    });
+    ```
+  </Tab>
+  <Tab title="Per-request (direct)">
+    Pass `testMode: true` on a single `sendMessage`, `createOutboundCall`, or `createWebCall` call to skip the provider for just that request, even when the client is not in test mode globally.
+
+    ```ts
+    export const sendTestMessage = internalAction({
+      args: { toNumber: v.string() },
+      returns: v.any(),
+      handler: async (ctx, args) =>
+        await agentphone.sendMessage(ctx, {
+          toNumber: args.toNumber,
+          body: "Test notification",
+          testMode: true,
+        }),
+    });
+    ```
+  </Tab>
+  <Tab title="Per-request (queued)">
+    Pass `testMode: true` in the `QueueOptions` when enqueuing to exercise the full queue lifecycle without a provider call.
+
+    ```ts
+    await agentphone.enqueueMessage(ctx, {
+      toNumber: "+15550001234",
+      body: "Test notification",
+      idempotencyKey: "test-run-001",
+      testMode: true,
+    });
+    ```
+  </Tab>
+</Tabs>
+
+## Queued test mode example
+
+The following example shows a full queued message in test mode — the same code you would use in production, with `testMode: true` added.
+
+```ts
+await agentphone.enqueueMessage(ctx, {
+  toNumber: "+15550001234",
+  body: "Test notification",
+  idempotencyKey: "test-run-001",
+  testMode: true,
+});
+```
+
+You can then query the status using the `requestId` returned by the enqueue call:
+
+```ts
+const record = await agentphone.getOutboundStatus(ctx, { requestId });
+// record.status will be "sent" once the scheduled action has run
+```
+
+## When to use test mode
+
+<CardGroup cols={3}>
+  <Card title="CI/CD pipelines" icon="circle-check">
+    Run your full integration test suite without provisioning a real AgentPhone account or managing test credentials in your pipeline secrets.
+  </Card>
+  <Card title="Integration tests" icon="flask">
+    Exercise your mutation and action logic end-to-end, including the queue and callback handlers, in a self-contained test environment.
+  </Card>
+  <Card title="Local development" icon="laptop-code">
+    Build and iterate without an active AgentPhone subscription. The full state machine runs locally so you can validate status queries and downstream effects.
+  </Card>
+</CardGroup>
+
+<Note>
+  Test mode still writes to local state. A queued request in test mode is stored in the component table, moves through `queued → sending → sent`, and is visible to `getOutboundStatus` and `listOutboundRequests` — the only thing skipped is the outbound HTTP call to the AgentPhone API.
+</Note>
+
+## Unit testing with convex-test
+
+For unit-level testing of individual mutations and actions that use the component, the `agentphone-convex` package lists `convex-test` as an optional peer dependency. You can use `convex-test` to mount the component in an in-memory Convex environment and assert on database state directly, without needing a deployed backend.
+
+<Tip>
+  `convex-test` gives you a fully functional in-memory Convex environment for unit tests. Combine it with `testMode: true` on your client to test the complete path — from mutation enqueue through scheduled action execution to terminal status — in isolation.
+</Tip>

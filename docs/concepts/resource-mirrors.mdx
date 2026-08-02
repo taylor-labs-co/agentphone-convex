@@ -1,0 +1,104 @@
+---
+title: "Resource Mirrors: Reactive AgentPhone State in Convex"
+sidebarTitle: "Resource Mirrors"
+description: "Discover how agentphone-convex keeps a live, queryable copy of your AgentPhone agents, numbers, conversations, messages, calls, and transcripts in Convex."
+---
+
+Resource mirrors are scoped Convex tables that hold the latest known state of your AgentPhone resources — agents, numbers, conversations, messages, calls, transcripts, and recordings. Because they live in Convex, you can query them from normal Convex queries and subscribe to them reactively from your frontend, exactly like any other Convex data.
+
+## How mirrors stay up to date
+
+The component writes to the mirror tables automatically from several sources. You rarely need to trigger a sync yourself:
+
+<Steps>
+  <Step title="Incoming webhooks">
+    Every verified webhook event is unpacked and the relevant resource records are upserted into the mirror tables before your callback runs. A new message creates or updates both the `messages` and `conversations` mirrors. A call-ended event updates the `calls` mirror.
+  </Step>
+  <Step title="Direct API sends and calls">
+    When you call `sendMessage` or `createOutboundCall` from an action, the successful response is immediately written into the mirror tables on a best-effort basis. Local bookkeeping never turns a successful provider side effect into a failed action.
+  </Step>
+  <Step title="Queued outbound work">
+    Completed items in the durable outbound queue — messages, outbound calls, web calls — update the same mirror tables after the provider accepts them.
+  </Step>
+  <Step title="Transcript and recording fetches">
+    Calling `getCallTranscript` or `getCallRecording` from an action fetches the data from AgentPhone and writes it into the `callTranscripts` or `callRecordings` mirror tables.
+  </Step>
+  <Step title="Explicit syncs">
+    Use `syncAgents`, `syncNumbers`, `syncConversations`, `syncMessages`, and `syncCalls` from actions to pull a bounded page of provider data and normalize it into the mirrors for backfills or reconciliation.
+  </Step>
+</Steps>
+
+## Querying the mirrors
+
+All mirror reads go through the `AgentPhone` client. The methods are available from Convex queries, mutations, and actions. Every read is index-backed, defaults to 50 records, and rejects limits above 100.
+
+### Conversation state
+
+The `getLatestConversationState` method is the most common read — it returns a conversation record and its most recent messages in a single round-trip:
+
+```ts
+import { v } from "convex/values";
+import { query } from "./_generated/server.js";
+import { requireAgentPhoneScopeAccess } from "agentphone-convex";
+import { agentphone } from "./agentphone.js";
+
+export const conversationState = query({
+  args: { conversationId: v.string() },
+  returns: v.any(),
+  handler: async (ctx, args) => {
+    await requireAgentPhoneScopeAccess(ctx, { scope: agentphone.scope });
+    return await agentphone.getLatestConversationState(ctx, {
+      ...args,
+      messageLimit: 25,
+    });
+  },
+});
+```
+
+### Available read methods
+
+The full set of mirror query methods on the `AgentPhone` client:
+
+| Method | Returns |
+|---|---|
+| `listLocalAgents(ctx, { limit? })` | `AgentPhoneAgent[]` |
+| `getLocalAgent(ctx, { agentId })` | `AgentPhoneAgent \| null` |
+| `listLocalNumbers(ctx, { limit? })` | `AgentPhoneNumber[]` |
+| `getLocalNumber(ctx, { numberId })` | `AgentPhoneNumber \| null` |
+| `listLocalConversations(ctx, { agentId?, numberId?, counterparty?, limit? })` | `AgentPhoneConversation[]` |
+| `getLocalConversation(ctx, { conversationId })` | `AgentPhoneConversation \| null` |
+| `listLocalMessagesByConversation(ctx, { conversationId, limit? })` | `AgentPhoneMessage[]` |
+| `listLocalMessagesByAgent(ctx, { agentId, limit? })` | `AgentPhoneMessage[]` |
+| `listLocalMessagesByNumber(ctx, { numberId, limit? })` | `AgentPhoneMessage[]` |
+| `listLocalMessagesByCounterparty(ctx, { counterparty, limit? })` | `AgentPhoneMessage[]` |
+| `listLocalCallsByAgent(ctx, { agentId, limit? })` | `AgentPhoneCall[]` |
+| `listLocalCallsByNumber(ctx, { numberId, limit? })` | `AgentPhoneCall[]` |
+| `getLocalCallTranscript(ctx, { callId })` | `AgentPhoneCallTranscript \| null` |
+| `getLocalCallRecording(ctx, { callId })` | `AgentPhoneCallRecording \| null` |
+| `getLatestConversationState(ctx, { conversationId, messageLimit? })` | `{ conversation, messages } \| null` |
+
+<Warning>
+  All list methods reject a `limit` above 100. If you need to page through more records, use the explicit sync helpers (`syncMessages`, `syncConversations`, etc.) with your own pagination loop.
+</Warning>
+
+## Exported validators
+
+The package exports a Convex validator for each mirrored resource type. Use these in your own function `returns` signatures and in validators passed to `v.array()`:
+
+```ts
+import {
+  agentValidator,
+  numberValidator,
+  conversationValidator,
+  messageValidator,
+  callValidator,
+  callTranscriptValidator,
+  callRecordingValidator,
+} from "agentphone-convex";
+```
+
+These validators match the exact shape stored in the component tables, including optional fields. They are derived directly from the component schema, so they stay in sync with the package automatically.
+
+<Tip>
+  Using the exported validators in your own function return types gives you end-to-end TypeScript inference from the Convex query all the way to your frontend client.
+</Tip>

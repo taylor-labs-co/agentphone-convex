@@ -1,0 +1,380 @@
+---
+title: "Outbound Queue API — Enqueue, Track, and Cancel Requests"
+sidebarTitle: "Outbound Queue"
+description: "Durably enqueue messages, outbound calls, and web calls with retry support, then query or cancel requests using the Convex-native outbound queue."
+---
+
+The outbound queue lets you schedule messages and calls from a Convex mutation or action and have the component deliver them reliably — even across function retries or transient AgentPhone API errors. Each request is written to Convex first, dispatched immediately via the Convex scheduler, and retried automatically on eligible failures. You can inspect the live status of any request with a standard Convex query, and cancel it before it leaves the queue.
+
+## `enqueueMessage`
+
+```typescript
+agentPhone.enqueueMessage(
+  ctx: MutationCtx | ActionCtx,
+  args: SendMessageArgs & QueueOptions
+): Promise<{ requestId: string; status: OutboundStatus }>
+```
+
+Writes a new outbound message request to Convex and schedules its delivery. You must provide exactly one of `toNumber` or `recipients`.
+
+<ParamField path="body" type="string" required>
+  The message text to send.
+</ParamField>
+
+<ParamField path="toNumber" type="string">
+  E.164 phone number of the recipient. Provide this **or** `recipients`, not both.
+</ParamField>
+
+<ParamField path="recipients" type="string[]">
+  Array of E.164 phone numbers for a group or multi-recipient send. Provide this **or** `toNumber`, not both.
+</ParamField>
+
+<ParamField path="agentId" type="string">
+  The AgentPhone agent to send from. Falls back to `defaultAgentId` on the `AgentPhone` instance.
+</ParamField>
+
+<ParamField path="numberId" type="string">
+  The phone number ID to send from. Falls back to `defaultNumberId` on the `AgentPhone` instance.
+</ParamField>
+
+<ParamField path="fromNumber" type="string">
+  E.164 sender number. Use `numberId` when possible to avoid ambiguity.
+</ParamField>
+
+<ParamField path="channel" type='"whatsapp"'>
+  Force the message onto the WhatsApp channel. Omit to let AgentPhone choose.
+</ParamField>
+
+<ParamField path="mediaUrls" type="string[]">
+  URLs of media attachments to include with the message.
+</ParamField>
+
+<ParamField path="sendStyle" type="SendStyle">
+  iMessage send effect. One of `"celebration"`, `"fireworks"`, `"lasers"`, `"love"`, `"confetti"`, `"balloons"`, `"spotlight"`, `"echo"`, `"invisible"`, `"gentle"`, `"loud"`, or `"slam"`.
+</ParamField>
+
+<ParamField path="replyToMessageId" type="string">
+  Message ID to thread this reply under.
+</ParamField>
+
+<ParamField path="buttons" type="string[]">
+  Quick-reply button labels for supported channels.
+</ParamField>
+
+<ParamField path="list" type="object">
+  List picker payload for supported channels.
+</ParamField>
+
+<ParamField path="idempotencyKey" type="string">
+  Deduplication key scoped to this component instance. If a request with the same key already exists, `enqueueMessage` returns that existing request instead of creating a new one.
+</ParamField>
+
+<ParamField path="maxAttempts" type="number">
+  Total delivery attempts including the first. Must be an integer between 1 and 5. Defaults to `1`.
+</ParamField>
+
+<ParamField path="testMode" type="boolean">
+  When `true`, the component runs the full queue and local-state logic but skips the actual AgentPhone API call. Useful for integration tests. Falls back to `testMode` on the `AgentPhone` instance.
+</ParamField>
+
+**Returns** an object with:
+
+<ResponseField name="requestId" type="string">
+  The Convex document ID of the queued request. Pass this to `getOutboundStatus` to poll progress.
+</ResponseField>
+
+<ResponseField name="status" type="OutboundStatus">
+  Always `"queued"` for a newly created request. Returns the existing status if the `idempotencyKey` matched an earlier request.
+</ResponseField>
+
+```typescript
+// convex/mutations/notify.ts
+import { mutation } from "./_generated/server";
+import { agentPhone } from "../agentphone";
+
+export const notifyUser = mutation({
+  args: { phone: v.string(), message: v.string() },
+  handler: async (ctx, { phone, message }) => {
+    const { requestId } = await agentPhone.enqueueMessage(ctx, {
+      toNumber: phone,
+      body: message,
+      maxAttempts: 3,
+    });
+    return requestId;
+  },
+});
+```
+
+---
+
+## `enqueueOutboundCall`
+
+```typescript
+agentPhone.enqueueOutboundCall(
+  ctx: MutationCtx | ActionCtx,
+  args: CreateOutboundCallArgs & QueueOptions
+): Promise<{ requestId: string; status: OutboundStatus }>
+```
+
+Enqueues a new outbound phone call. `agentId` is required — either pass it directly or set `defaultAgentId` on the `AgentPhone` instance.
+
+<ParamField path="toNumber" type="string" required>
+  E.164 phone number to call.
+</ParamField>
+
+<ParamField path="agentId" type="string">
+  The AgentPhone agent that will handle the call. Required unless `defaultAgentId` is set on the instance.
+</ParamField>
+
+<ParamField path="fromNumberId" type="string">
+  The phone number ID to call from.
+</ParamField>
+
+<ParamField path="initialGreeting" type="string">
+  Override the agent's opening line for this call.
+</ParamField>
+
+<ParamField path="voice" type="string">
+  Voice ID to use for this call.
+</ParamField>
+
+<ParamField path="systemPrompt" type="string">
+  Override the agent's system prompt for this call.
+</ParamField>
+
+<ParamField path="modelTier" type='"turbo" | "balanced" | "max"'>
+  LLM model tier to use.
+</ParamField>
+
+<ParamField path="variables" type="Record<string, string>">
+  Key-value pairs injected into the agent's prompt template.
+</ParamField>
+
+<ParamField path="callScreeningIdentity" type="string">
+  Caller identity string displayed during call screening.
+</ParamField>
+
+<ParamField path="callScreeningPurpose" type="string">
+  Purpose string displayed during call screening.
+</ParamField>
+
+<ParamField path="idempotencyKey" type="string">
+  Deduplication key. See `enqueueMessage` for details.
+</ParamField>
+
+<ParamField path="maxAttempts" type="number">
+  Total attempts, 1–5. Defaults to `1`.
+</ParamField>
+
+<ParamField path="testMode" type="boolean">
+  Skip the live API call when `true`.
+</ParamField>
+
+Returns the same `{ requestId, status }` shape as `enqueueMessage`.
+
+<Warning>
+  `enqueueOutboundCall` throws immediately if neither `args.agentId` nor `defaultAgentId` is set on the instance.
+</Warning>
+
+---
+
+## `enqueueWebCall`
+
+```typescript
+agentPhone.enqueueWebCall(
+  ctx: MutationCtx | ActionCtx,
+  args: CreateWebCallArgs & QueueOptions
+): Promise<{ requestId: string; status: OutboundStatus }>
+```
+
+Enqueues a web-based (browser/app) call session. Like `enqueueOutboundCall`, `agentId` is required.
+
+<ParamField path="agentId" type="string">
+  The agent to handle the web call. Required unless `defaultAgentId` is set.
+</ParamField>
+
+<ParamField path="metadata" type="object">
+  Arbitrary JSON metadata attached to the call session.
+</ParamField>
+
+<ParamField path="variables" type="Record<string, string>">
+  Key-value pairs injected into the agent's prompt template.
+</ParamField>
+
+<ParamField path="idempotencyKey" type="string">
+  Deduplication key.
+</ParamField>
+
+<ParamField path="maxAttempts" type="number">
+  Total attempts, 1–5. Defaults to `1`.
+</ParamField>
+
+<ParamField path="testMode" type="boolean">
+  Skip the live API call when `true`.
+</ParamField>
+
+Returns the same `{ requestId, status }` shape as `enqueueMessage`.
+
+---
+
+## `getOutboundStatus`
+
+```typescript
+agentPhone.getOutboundStatus(
+  ctx: QueryCtx | MutationCtx | ActionCtx,
+  args: { requestId: string }
+): Promise<AgentPhoneOutboundRequest | null>
+```
+
+Returns the stored state of a single outbound request, or `null` if the ID does not belong to this client's scope.
+
+<ParamField path="requestId" type="string" required>
+  The ID returned by `enqueueMessage`, `enqueueOutboundCall`, or `enqueueWebCall`.
+</ParamField>
+
+<ResponseField name="AgentPhoneOutboundRequest" type="object">
+  <Expandable title="fields">
+    <ResponseField name="scope" type="string">
+      The component scope this request belongs to.
+    </ResponseField>
+    <ResponseField name="kind" type='"message" | "outbound_call" | "web_call"'>
+      The type of outbound request.
+    </ResponseField>
+    <ResponseField name="status" type="OutboundStatus">
+      Current status: `"queued"`, `"sending"`, `"sent"`, `"failed"`, or `"cancelled"`.
+    </ResponseField>
+    <ResponseField name="agentId" type="string">
+      The agent ID associated with this request, if applicable.
+    </ResponseField>
+    <ResponseField name="attempts" type="number">
+      Number of delivery attempts made so far.
+    </ResponseField>
+    <ResponseField name="maxAttempts" type="number">
+      Maximum number of delivery attempts allowed.
+    </ResponseField>
+    <ResponseField name="idempotencyKey" type="string">
+      The deduplication key, if one was provided.
+    </ResponseField>
+    <ResponseField name="result" type="unknown">
+      The response returned by AgentPhone after a successful send.
+    </ResponseField>
+    <ResponseField name="error" type="string">
+      The last error message, if the request failed.
+    </ResponseField>
+    <ResponseField name="messageId" type="string">
+      Extracted message ID from the AgentPhone response, for message requests.
+    </ResponseField>
+    <ResponseField name="callId" type="string">
+      Extracted call ID from the AgentPhone response, for call requests.
+    </ResponseField>
+    <ResponseField name="conversationId" type="string">
+      Extracted conversation ID from the AgentPhone response, if available.
+    </ResponseField>
+    <ResponseField name="createdAt" type="number">
+      Unix timestamp (ms) when the request was enqueued.
+    </ResponseField>
+    <ResponseField name="updatedAt" type="number">
+      Unix timestamp (ms) of the last status change.
+    </ResponseField>
+    <ResponseField name="nextAttemptAt" type="number">
+      Unix timestamp (ms) when the next retry is scheduled, if applicable.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+Because this is a Convex query, you can call it from a reactive query function and your UI will update the moment the status changes:
+
+```typescript
+// convex/queries/outbound.ts
+import { query } from "./_generated/server";
+import { agentPhone } from "../agentphone";
+
+export const requestStatus = query({
+  args: { requestId: v.string() },
+  handler: async (ctx, { requestId }) => {
+    return agentPhone.getOutboundStatus(ctx, { requestId });
+  },
+});
+```
+
+---
+
+## `listOutboundRequests`
+
+```typescript
+agentPhone.listOutboundRequests(
+  ctx: QueryCtx | MutationCtx | ActionCtx,
+  args?: { status?: OutboundStatus; agentId?: string; limit?: number }
+): Promise<AgentPhoneOutboundRequest[]>
+```
+
+Returns up to `limit` outbound requests for this client's scope, ordered by most recent first. You can filter by `status` **or** by `agentId`, but not both simultaneously.
+
+<ParamField path="status" type="OutboundStatus">
+  Filter to requests in a specific status. One of `"queued"`, `"sending"`, `"sent"`, `"failed"`, or `"cancelled"`. Cannot be combined with `agentId`.
+</ParamField>
+
+<ParamField path="agentId" type="string">
+  Filter to requests for a specific agent. Cannot be combined with `status`.
+</ParamField>
+
+<ParamField path="limit" type="number">
+  Maximum number of records to return. Must be between 1 and 100. Defaults to `50`.
+</ParamField>
+
+```typescript
+// List all queued requests waiting to be sent
+const pending = await agentPhone.listOutboundRequests(ctx, {
+  status: "queued",
+});
+```
+
+---
+
+## `cancelOutboundRequest`
+
+```typescript
+agentPhone.cancelOutboundRequest(
+  ctx: MutationCtx | ActionCtx,
+  args: { requestId: string }
+): Promise<boolean>
+```
+
+Attempts to cancel a queued outbound request before it is dispatched. Returns `true` if the request was successfully cancelled, or `false` if it was not found, belongs to a different scope, or was already in a non-`queued` status.
+
+<ParamField path="requestId" type="string" required>
+  The ID of the request to cancel.
+</ParamField>
+
+<Note>
+  Cancellation only works while `status === "queued"`. Once the scheduler picks up the request and transitions it to `"sending"`, it cannot be cancelled. Check the return value to confirm whether cancellation succeeded.
+</Note>
+
+```typescript
+const cancelled = await agentPhone.cancelOutboundRequest(ctx, { requestId });
+if (!cancelled) {
+  console.warn("Request was already dispatched and could not be cancelled.");
+}
+```
+
+---
+
+## `OutboundStatus` values
+
+| Status | Description |
+|---|---|
+| `"queued"` | Written to Convex, waiting for the scheduler to pick it up. |
+| `"sending"` | The scheduler has claimed the request and is calling the AgentPhone API. |
+| `"sent"` | AgentPhone accepted the request. The `result` field contains the API response. |
+| `"failed"` | All delivery attempts were exhausted. The `error` field contains the last failure reason. |
+| `"cancelled"` | The request was cancelled before it left the queue. |
+
+---
+
+## Retry behavior
+
+The queue retries requests that fail with transient errors (HTTP 408, HTTP 429, or any 5xx status). Permanent rejections (4xx errors other than 408/429) are terminal and move the request directly to `"failed"`. Retries use exponential backoff starting at 1 second and capped at 30 minutes.
+
+<Tip>
+  Use `idempotencyKey` whenever you enqueue from user-facing mutations. If your mutation is retried by Convex's optimistic concurrency, the same key will return the existing request rather than creating a duplicate send.
+</Tip>

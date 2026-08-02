@@ -1,0 +1,202 @@
+---
+title: "Messages API — sendMessage and sendReaction Reference"
+sidebarTitle: "Messages"
+description: "Send SMS, MMS, iMessage, and WhatsApp messages with sendMessage, apply iMessage bubble and screen effects using SendStyle, and react with sendReaction."
+---
+
+The Messages API lets you send outbound messages and reactions via the AgentPhone platform from within your Convex actions. Both `sendMessage` and `sendReaction` are methods on the `AgentPhone` client class and must be called from an `ActionCtx` — they make live HTTP calls to the AgentPhone provider and update the local resource mirror on a best-effort basis.
+
+---
+
+## `sendMessage(ctx, args)`
+
+Sends an outbound message through AgentPhone. You must provide exactly one of `toNumber` or `recipients` — passing both or neither throws an error at runtime.
+
+```typescript
+import { internalAction } from "./_generated/server.js";
+import { v } from "convex/values";
+import { agentphone } from "./agentphone.js";
+
+export const textCustomer = internalAction({
+  args: { toNumber: v.string(), body: v.string() },
+  returns: v.any(),
+  handler: async (ctx, args) =>
+    await agentphone.sendMessage(ctx, {
+      body: args.body,
+      toNumber: args.toNumber,
+    }),
+});
+```
+
+### Parameters
+
+<ParamField body="body" type="string" required>
+  The text body of the message. Required even when sending MMS media — pass an empty string only when sending a multi-image iMessage carousel (which does not support a text body alongside multiple media URLs).
+</ParamField>
+
+<ParamField body="toNumber" type="string">
+  The recipient's E.164-formatted phone number (e.g. `+15005550006`). Provide exactly one of `toNumber` or `recipients`.
+</ParamField>
+
+<ParamField body="recipients" type="string[]">
+  An array of E.164 phone numbers for creating a new iMessage group conversation. Must contain at least two numbers. Provide exactly one of `toNumber` or `recipients`.
+</ParamField>
+
+<ParamField body="mediaUrls" type="string[]">
+  An array of publicly accessible URLs to attach as MMS or iMessage media. Maximum 20 URLs. When more than one URL is provided, the message is treated as an iMessage carousel and `body` must be empty.
+</ParamField>
+
+<ParamField body="agentId" type="string">
+  The AgentPhone agent ID to send from. Overrides the `defaultAgentId` set on the `AgentPhone` client instance.
+</ParamField>
+
+<ParamField body="numberId" type="string">
+  The AgentPhone phone number ID to send from. Overrides the `defaultNumberId` set on the client instance.
+</ParamField>
+
+<ParamField body="fromNumber" type="string">
+  An explicit E.164 from-number. Takes precedence over `numberId` when both are present.
+</ParamField>
+
+<ParamField body="channel" type='"whatsapp"'>
+  Force the message to be sent over the WhatsApp channel. When omitted, AgentPhone selects the channel automatically based on the agent and number configuration.
+</ParamField>
+
+<ParamField body="sendStyle" type="SendStyle">
+  An iMessage send effect to apply. Only takes effect on iMessage channels. See the [`SendStyle` values](#sendstyle-values) reference below.
+</ParamField>
+
+<ParamField body="replyToMessageId" type="string">
+  The AgentPhone message ID to reply to, creating a threaded reply in a supported channel.
+</ParamField>
+
+<ParamField body="buttons" type="string[]">
+  An array of interactive button labels to attach to the message on channels that support them.
+</ParamField>
+
+<ParamField body="list" type="JsonValue">
+  A structured list payload for channels that support interactive list messages.
+</ParamField>
+
+<ParamField body="testMode" type="boolean">
+  When `true`, skips the live provider call and returns a `TestModeResult` instead. Overrides the `testMode` flag set on the client instance.
+</ParamField>
+
+### Return value
+
+Returns `SendMessageResult` on success, or `TestModeResult` when `testMode` is `true`.
+
+<Expandable title="SendMessageResult fields">
+  <ResponseField name="id" type="string">
+    The AgentPhone message ID for this sent message.
+  </ResponseField>
+  <ResponseField name="status" type="string">
+    The delivery status returned by the provider at send time (e.g. `"queued"`, `"sent"`).
+  </ResponseField>
+  <ResponseField name="channel" type="string">
+    The channel the message was sent on (e.g. `"sms"`, `"imessage"`, `"whatsapp"`).
+  </ResponseField>
+  <ResponseField name="from_number" type="string">
+    The E.164 phone number the message was sent from.
+  </ResponseField>
+  <ResponseField name="to_number" type="string">
+    The E.164 phone number the message was sent to.
+  </ResponseField>
+  <ResponseField name="conversation_id" type="string | null">
+    The AgentPhone conversation ID this message belongs to, or `null` if none was created or matched.
+  </ResponseField>
+  <ResponseField name="media_urls" type="string[]">
+    The media URLs attached to the message, if any were provided.
+  </ResponseField>
+  <ResponseField name="reply_to_message_id" type="string | null">
+    The message ID this message is a reply to, if a `replyToMessageId` was supplied.
+  </ResponseField>
+</Expandable>
+
+<Expandable title="TestModeResult fields">
+  <ResponseField name="testMode" type="true">
+    Always `true` when the result is a test-mode response.
+  </ResponseField>
+  <ResponseField name="status" type='"skipped"'>
+    Always `"skipped"` — no provider call was made.
+  </ResponseField>
+  <ResponseField name="kind" type='"message"'>
+    Always `"message"` for `sendMessage`.
+  </ResponseField>
+  <ResponseField name="args" type="JsonValue">
+    The request body that would have been sent to the provider.
+  </ResponseField>
+</Expandable>
+
+<Note>
+  A successful provider send always updates the local resource mirror and appends an API event on a best-effort basis. Local bookkeeping failures never cause a successfully sent message to appear as a failed action, so you don't accidentally retry an already-delivered message.
+</Note>
+
+---
+
+## `sendReaction(ctx, args)`
+
+Sends a reaction to an existing message on a channel that supports reactions (primarily iMessage). This method calls the AgentPhone reactions endpoint internally and returns the raw provider response.
+
+```typescript
+import { internalAction } from "./_generated/server.js";
+import { v } from "convex/values";
+import { agentphone } from "./agentphone.js";
+
+export const reactToMessage = internalAction({
+  args: { messageId: v.string(), reaction: v.string() },
+  returns: v.any(),
+  handler: async (ctx, args) =>
+    await agentphone.sendReaction(ctx, {
+      messageId: args.messageId,
+      reaction: args.reaction,
+    }),
+});
+```
+
+### Parameters
+
+<ParamField body="messageId" type="string" required>
+  The AgentPhone message ID to react to. This is the `id` field returned by `sendMessage` or received in an incoming message event.
+</ParamField>
+
+<ParamField body="reaction" type="string" required>
+  The reaction string to apply. Reaction values are defined by the channel — on iMessage, common values are `"love"`, `"like"`, `"dislike"`, `"laugh"`, `"emphasize"`, and `"question"`.
+</ParamField>
+
+<Warning>
+  `sendReaction` is only effective on channels that support message reactions. Sending a reaction on SMS or WhatsApp will result in a provider error or a no-op depending on the platform configuration.
+</Warning>
+
+---
+
+## `SendStyle` values
+
+The `SendStyle` type controls the iMessage bubble or screen effect applied when a message is delivered. You can pass any of the following string literals as `sendStyle`:
+
+| Value | Effect type |
+|---|---|
+| `"celebration"` | Screen effect |
+| `"fireworks"` | Screen effect |
+| `"lasers"` | Screen effect |
+| `"love"` | Screen effect |
+| `"confetti"` | Screen effect |
+| `"balloons"` | Screen effect |
+| `"spotlight"` | Screen effect |
+| `"echo"` | Screen effect |
+| `"invisible"` | Bubble effect |
+| `"gentle"` | Bubble effect |
+| `"loud"` | Bubble effect |
+| `"slam"` | Bubble effect |
+
+<Tip>
+  Send effects are silently ignored on non-iMessage channels. You don't need to guard against this in your code — AgentPhone passes the value through and the channel determines whether to apply it.
+</Tip>
+
+```typescript
+await agentphone.sendMessage(ctx, {
+  body: "Congratulations! 🎉",
+  toNumber: "+15005550006",
+  sendStyle: "confetti",
+});
+```

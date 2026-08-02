@@ -1,0 +1,232 @@
+---
+title: "Webhook Deliveries API — Inspect, Replay, and Clean Up"
+sidebarTitle: "Webhook Deliveries"
+description: "List, filter, and replay webhook delivery records stored in Convex, surface failed dispatches, and purge old records on a configurable schedule."
+---
+
+Every webhook event that arrives at your endpoint is recorded as a `webhookDelivery` document in Convex before any callback is invoked. These records let you audit what your backend received, diagnose failed dispatches, replay dead-letter events without waiting for another trigger from AgentPhone, and prune old records to control storage growth. All read methods are standard Convex queries, so they compose naturally with reactive UI subscriptions.
+
+## `listWebhookDeliveries`
+
+```typescript
+agentPhone.listWebhookDeliveries(
+  ctx: QueryCtx | MutationCtx | ActionCtx,
+  args?: { status?: DeliveryStatus; agentId?: string; limit?: number }
+): Promise<AgentPhoneWebhookDelivery[]>
+```
+
+Returns up to `limit` delivery records for this client's scope, ordered by most recent first. You can filter by `status` **or** by `agentId`, but not both at the same time.
+
+<ParamField path="status" type="DeliveryStatus">
+  Filter to deliveries in a specific status. Cannot be combined with `agentId`. See the [DeliveryStatus reference](#deliverystatus-values) below for all possible values.
+</ParamField>
+
+<ParamField path="agentId" type="string">
+  Filter to deliveries whose event carried a specific `agentId`. Cannot be combined with `status`.
+</ParamField>
+
+<ParamField path="limit" type="number">
+  Maximum number of records to return. Must be an integer between 1 and 100. Defaults to `50`.
+</ParamField>
+
+```typescript
+// convex/queries/deliveries.ts
+import { query } from "./_generated/server";
+import { agentPhone } from "../agentphone";
+
+export const recentDeliveries = query({
+  args: {},
+  handler: async (ctx) => {
+    return agentPhone.listWebhookDeliveries(ctx, { limit: 20 });
+  },
+});
+```
+
+---
+
+## `listFailedWebhookDeliveries`
+
+```typescript
+agentPhone.listFailedWebhookDeliveries(
+  ctx: QueryCtx | MutationCtx | ActionCtx,
+  args?: { limit?: number }
+): Promise<AgentPhoneWebhookDelivery[]>
+```
+
+Convenience method that returns both `"failed"` and `"dead_letter"` deliveries in a single call, merged and sorted by most recent first. Use this to build monitoring dashboards or alerting without having to issue two separate queries.
+
+<ParamField path="limit" type="number">
+  Maximum number of records to return across both statuses combined. Must be between 1 and 100. Defaults to `50`.
+</ParamField>
+
+<Note>
+  Internally this runs two index scans — one for `"failed"` and one for `"dead_letter"` — then merges and sorts the results. The merged list is truncated to `limit`.
+</Note>
+
+---
+
+## `replayWebhookDelivery`
+
+```typescript
+agentPhone.replayWebhookDelivery(
+  ctx: ActionCtx,
+  args: { deliveryId: string }
+): Promise<boolean>
+```
+
+Re-enqueues a delivery for callback dispatch, resetting its `attempts` counter and status to `"retrying"`. Returns `true` if the replay was scheduled, or `false` if the delivery was not found, had no registered callback, or was already in `"dispatched"` status.
+
+<ParamField path="deliveryId" type="string" required>
+  The AgentPhone-assigned delivery ID (the value of the `X-Webhook-ID` header from the original request). This is stored on the `deliveryId` field of the delivery record.
+</ParamField>
+
+<Warning>
+  Replaying a delivery re-invokes your callback mutation with the original event payload. Make sure your callback is idempotent before replaying events that may have partially succeeded.
+</Warning>
+
+```typescript
+// Replay a dead-lettered delivery from an admin action
+export const replayDead = action({
+  args: { deliveryId: v.string() },
+  handler: async (ctx, { deliveryId }) => {
+    const replayed = await agentPhone.replayWebhookDelivery(ctx, { deliveryId });
+    if (!replayed) {
+      throw new Error(`Delivery ${deliveryId} could not be replayed.`);
+    }
+  },
+});
+```
+
+---
+
+## `cleanupWebhookDeliveries`
+
+```typescript
+agentPhone.cleanupWebhookDeliveries(
+  ctx: MutationCtx | ActionCtx,
+  args: { olderThanMs?: number; limit?: number; statuses?: string[] }
+): Promise<number>
+```
+
+Deletes delivery records (and their associated event documents) that were received before a given age threshold. Returns the number of records deleted. Call this from a scheduled Convex function to keep your database from growing unboundedly.
+
+<ParamField path="olderThanMs" type="number">
+  Delete records older than this many milliseconds. Defaults to `2592000000` (30 days).
+</ParamField>
+
+<ParamField path="limit" type="number">
+  Maximum number of records to delete in a single call. Must be between 1 and 100. Defaults to `50`. Call repeatedly until the return value is `0` to process a large backlog.
+</ParamField>
+
+<ParamField path="statuses" type="string[]">
+  Restrict deletion to records in these statuses. When omitted, all statuses older than the threshold are eligible. Useful when you want to retain `"dead_letter"` records for manual review while purging `"dispatched"` ones.
+</ParamField>
+
+```typescript
+// convex/crons.ts
+import { cronJobs } from "convex/server";
+import { internal } from "./_generated/api";
+
+const crons = cronJobs();
+
+crons.weekly(
+  "clean up old webhook deliveries",
+  { dayOfWeek: "sunday", hourUTC: 2, minuteUTC: 0 },
+  internal.cleanup.webhookDeliveries,
+);
+
+export default crons;
+```
+
+```typescript
+// convex/cleanup.ts
+import { internalAction } from "./_generated/server";
+import { agentPhone } from "./agentphone";
+
+export const webhookDeliveries = internalAction({
+  args: {},
+  handler: async (ctx) => {
+    let deleted = 0;
+    let batch: number;
+    do {
+      batch = await agentPhone.cleanupWebhookDeliveries(ctx, {
+        olderThanMs: 30 * 24 * 60 * 60 * 1000,
+        limit: 100,
+        statuses: ["dispatched", "ignored"],
+      });
+      deleted += batch;
+    } while (batch > 0);
+    console.log(`Cleaned up ${deleted} webhook deliveries.`);
+  },
+});
+```
+
+---
+
+## `DeliveryStatus` values
+
+| Status | Description |
+|---|---|
+| `"received"` | The event arrived and was recorded. Waiting for the async callback scheduler. |
+| `"dispatching"` | The callback is being invoked. For voice events this is synchronous; for others it is an async action. |
+| `"dispatched"` | The callback completed successfully. Terminal state. |
+| `"retrying"` | The callback failed and a retry has been scheduled. |
+| `"failed"` | An intermediate failure after at least one retry. May transition back to `"retrying"`. |
+| `"dead_letter"` | All retry attempts were exhausted. The delivery will not be retried automatically. Use `replayWebhookDelivery` to re-enqueue it manually. Terminal state. |
+| `"ignored"` | The event arrived but no callback was registered. The payload is stored for audit purposes. Terminal state. |
+
+---
+
+## `AgentPhoneWebhookDelivery` fields
+
+<ResponseField name="scope" type="string">
+  The component scope this delivery belongs to.
+</ResponseField>
+
+<ResponseField name="eventId" type="string">
+  The Convex document ID of the associated stored event.
+</ResponseField>
+
+<ResponseField name="deliveryId" type="string">
+  The AgentPhone-assigned delivery ID from the `X-Webhook-ID` request header.
+</ResponseField>
+
+<ResponseField name="eventType" type="string">
+  The event type string from the payload, e.g. `"agent.message"`.
+</ResponseField>
+
+<ResponseField name="status" type="DeliveryStatus">
+  Current delivery status. See the table above.
+</ResponseField>
+
+<ResponseField name="receivedAt" type="number">
+  Unix timestamp (ms) when the event arrived at your endpoint.
+</ResponseField>
+
+<ResponseField name="attempts" type="number">
+  Number of callback dispatch attempts made so far.
+</ResponseField>
+
+<ResponseField name="error" type="string">
+  The error message from the most recent failed dispatch attempt, if any.
+</ResponseField>
+
+---
+
+## Retry behavior
+
+Callback dispatch behavior differs by channel:
+
+**Voice events** (`channel === "voice"`) are dispatched **synchronously** inside the same Convex mutation that writes the delivery record. If your callback throws, the entire transaction rolls back — the delivery record is never written, and AgentPhone will retry the full webhook delivery. This ensures exactly-once processing for voice callbacks at the cost of synchronous latency.
+
+**All other events** are dispatched **asynchronously** via the Convex scheduler immediately after the delivery record is committed. If the callback throws, the system retries using exponential backoff:
+
+- Attempt 1 fails → retry after ~1 second
+- Attempt 2 fails → retry after ~2 seconds
+- Attempt 3 fails → retry after ~4 seconds
+
+After all three attempts are exhausted the delivery transitions to `"dead_letter"` and no further automatic retries occur. Call `replayWebhookDelivery` to try again manually after you have fixed the underlying issue.
+
+<Tip>
+  Subscribe to `listFailedWebhookDeliveries` from a Convex reactive query to build a live dashboard that surfaces dead-letter events as they accumulate, then replay them with a single button click.
+</Tip>

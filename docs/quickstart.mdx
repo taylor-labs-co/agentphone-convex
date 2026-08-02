@@ -1,0 +1,154 @@
+---
+title: "Quickstart: Add agentphone-convex to Your Convex App"
+sidebarTitle: "Quickstart"
+description: "Install the agentphone-convex component, configure your API key, register the webhook route, and send your first AI-powered message in a few minutes."
+---
+
+This guide walks you through adding `agentphone-convex` to an existing Convex project from scratch. By the end you will have the component mounted, your API key stored as a Convex environment variable, a shared client file, a live webhook endpoint, and a working action that sends a message through AgentPhone.
+
+<Steps>
+
+  <Step title="Install the package">
+    Run the following command in your project root to add `agentphone-convex` as a dependency:
+
+    ```sh
+    npm install agentphone-convex
+    ```
+  </Step>
+
+  <Step title="Mount the component">
+    Open (or create) `convex/convex.config.ts` and register the AgentPhone component with your app:
+
+    ```ts convex/convex.config.ts
+    import { defineApp } from "convex/server";
+    import agentphone from "agentphone-convex/convex.config.js";
+
+    const app = defineApp();
+    app.use(agentphone);
+    export default app;
+    ```
+
+    The `app.use(agentphone)` call provisions all the component's internal tables, scheduled functions, and HTTP handlers inside an isolated namespace so they never collide with your own schema.
+  </Step>
+
+  <Step title="Store your API key">
+    Set your AgentPhone project API key as a Convex environment variable. Run this command once for every Convex deployment (dev and prod) that will call AgentPhone:
+
+    ```sh
+    npx convex env set AGENTPHONE_API_KEY=your_key
+    ```
+
+    <Note>
+      The queue and scheduled actions read `AGENTPHONE_API_KEY` from the Convex environment at run time, so the key is never stored in your codebase or component tables.
+    </Note>
+  </Step>
+
+  <Step title="Create a shared client">
+    Create `convex/agentphone.ts` and export a single `AgentPhone` instance. All your Convex functions import this shared client rather than constructing their own:
+
+    ```ts convex/agentphone.ts
+    import { AgentPhone } from "agentphone-convex";
+    import { components } from "./_generated/api.js";
+
+    export const agentphone = new AgentPhone(components.agentphone, {
+      defaultAgentId: process.env.AGENTPHONE_AGENT_ID,
+      defaultNumberId: process.env.AGENTPHONE_NUMBER_ID,
+      scope: "default",
+    });
+    ```
+
+    `defaultAgentId` and `defaultNumberId` are optional convenience defaults—you can always override them per call. The `scope` field isolates all component records, delivery IDs, and queue keys. Use a stable tenant or workspace identifier when a single Convex app serves multiple AgentPhone projects.
+
+    <Tip>
+      Set `AGENTPHONE_AGENT_ID` and `AGENTPHONE_NUMBER_ID` as Convex environment variables (the same way you set `AGENTPHONE_API_KEY` above) so you can change them without redeploying code.
+    </Tip>
+  </Step>
+
+  <Step title="Register the webhook route">
+    Open (or create) `convex/http.ts` and call `agentphone.registerRoutes(http)` to mount the signed webhook endpoint on your Convex HTTP router:
+
+    ```ts convex/http.ts
+    import { httpRouter } from "convex/server";
+    import { agentphone } from "./agentphone.js";
+
+    const http = httpRouter();
+    agentphone.registerRoutes(http);
+    export default http;
+    ```
+
+    This registers a `POST /agentphone/webhook` route that verifies AgentPhone's `X-Webhook-Signature` and `X-Webhook-Timestamp` headers, deduplicates replays, and dispatches events to your callback functions.
+
+    <Note>
+      After deploying, run `agentphone.configureWebhook(ctx, { contextLimit: 10 })` from an internal action to point AgentPhone at your Convex site URL and persist the rotating signing secret automatically.
+    </Note>
+  </Step>
+
+  <Step title="Send your first message">
+    Add an `internalAction` to `convex/agentphone.ts` that calls `agentphone.sendMessage`. Provider calls must live in actions because they perform outbound HTTP requests. Import the shared client you created in Step 4:
+
+    ```ts convex/agentphone.ts
+    import { v } from "convex/values";
+    import { internalAction } from "./_generated/server.js";
+    import { agentphone } from "./agentphone.js";
+
+    export const sendWelcome = internalAction({
+      args: { toNumber: v.string() },
+      returns: v.any(),
+      handler: async (ctx, args) =>
+        await agentphone.sendMessage(ctx, {
+          toNumber: args.toNumber,
+          body: "Hello from AgentPhone!",
+        }),
+    });
+    ```
+
+    A successful send updates the local resource mirror and appends an API event to the event log on a best-effort basis. If you need idempotency, retries, or observable status, use `agentphone.enqueueMessage` from a mutation instead—see the [Outbound Queue](/guides/outbound-queue) guide.
+  </Step>
+
+  <Step title="Handle incoming events">
+    Assign `agentphone.incomingEventCallback` to an `internalMutation` reference and export the handler. Add these additions to `convex/agentphone.ts` alongside the client you created in Step 4:
+
+    ```ts convex/agentphone.ts
+    import { v } from "convex/values";
+    import { internalMutation } from "./_generated/server.js";
+    import { eventValidator, voiceResponseValidator } from "agentphone-convex";
+    import { internal } from "./_generated/api.js";
+    import { agentphone } from "./agentphone.js";
+
+    agentphone.incomingEventCallback = internal.agentphone.handleEvent;
+
+    export const handleEvent = internalMutation({
+      args: { event: eventValidator },
+      returns: v.union(voiceResponseValidator, v.null()),
+      handler: async (_ctx, { event }) => {
+        console.log("AgentPhone event", event.event, event.data);
+        return null;
+      },
+    });
+    ```
+
+    Voice events (`channel === "voice"`) run **synchronously** in the webhook transaction so you can return a `VoiceWebhookResponse` (e.g. `{ text: "One moment." }`) directly to AgentPhone. Non-voice callbacks run **asynchronously** and are retried with exponential backoff before becoming a dead letter.
+
+    <Tip>
+      Use the more specific `agentphone.incomingMessageCallback`, `agentphone.reactionCallback`, and `agentphone.callEndedCallback` to route different event families to separate handler functions.
+    </Tip>
+  </Step>
+
+</Steps>
+
+You now have a fully wired `agentphone-convex` integration. Your Convex deployment can send messages, receive signed webhook events, and store resource state reactively. Explore the guides below to go further.
+
+<CardGroup cols={2}>
+  <Card title="Send Messages" icon="message" href="/guides/send-messages">
+    Learn direct sends, queued delivery, media attachments, buttons, list pickers, and send styles.
+  </Card>
+  <Card title="Voice Calls" icon="phone" href="/guides/voice-calls">
+    Initiate outbound and web calls, handle voice webhook responses, and retrieve call transcripts.
+  </Card>
+  <Card title="Webhooks" icon="webhook" href="/guides/webhooks">
+    Configure webhook signing, inspect delivery history, replay failures, and manage dead letters.
+  </Card>
+  <Card title="Test Mode" icon="flask" href="/guides/test-mode">
+    Exercise the full queue and local state pipeline without an API key or live provider calls.
+  </Card>
+</CardGroup>

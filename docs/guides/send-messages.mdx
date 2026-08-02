@@ -1,0 +1,114 @@
+---
+title: "Send SMS, MMS, and iMessage with AgentPhone Convex"
+sidebarTitle: "Send Messages"
+description: "Send outbound messages to one or more recipients using the AgentPhone Convex component, with support for MMS, iMessage effects, reactions, and replies."
+---
+
+The `agentphone-convex` component gives you a typed `sendMessage` method you can call from any Convex action. Successful sends are automatically mirrored into your local Convex state, so reactive queries reflect new messages without a separate sync step. This guide covers every argument available on `sendMessage`, how to send a reaction, and what the response looks like.
+
+## Sending a message from an action
+
+Provider network calls must live inside Convex actions, not mutations. The simplest pattern is a thin `internalAction` that proxies directly to `agentphone.sendMessage`:
+
+```ts
+import { v } from "convex/values";
+import { internalAction } from "./_generated/server.js";
+import { agentphone } from "./agentphone.js";
+
+export const textCustomer = internalAction({
+  args: { toNumber: v.string(), body: v.string() },
+  returns: v.any(),
+  handler: async (ctx, args) => await agentphone.sendMessage(ctx, args),
+});
+```
+
+Call this action from any mutation or scheduler using `ctx.runAction(internal.agentphone.textCustomer, { toNumber: "+15555550100", body: "Your order shipped!" })`.
+
+## `SendMessageArgs` reference
+
+`sendMessage` accepts a `SendMessageArgs` object. Every field except `body` is optional.
+
+| Field | Type | Description |
+|---|---|---|
+| `body` | `string` | **Required.** The message text. |
+| `toNumber` | `string` | Recipient phone number. Provide either this or `recipients`. |
+| `recipients` | `string[]` | Multiple recipients for a group or bulk send. |
+| `mediaUrls` | `string[]` | One or more public media URLs to attach (MMS). |
+| `numberId` | `string` | ID of the sending number. Falls back to `defaultNumberId` set on the client. |
+| `agentId` | `string` | Agent to use for the send. Falls back to `defaultAgentId` set on the client. |
+| `fromNumber` | `string` | Explicit originating phone number (E.164). Overrides the number resolved via `numberId`. |
+| `channel` | `"whatsapp"` | Override the channel. Omit to let AgentPhone choose SMS or iMessage automatically. |
+| `replyToMessageId` | `string` | Thread the message as a reply to an existing message. |
+| `buttons` | `string[]` | Interactive button labels (iMessage only). |
+| `list` | `JsonValue` | Structured list payload for supported channels. |
+| `sendStyle` | `SendStyle` | iMessage bubble or screen effect. |
+
+### iMessage send styles
+
+The `sendStyle` field accepts any of the following values:
+
+<CodeGroup>
+```ts Bubble effects
+// Apply to the message bubble
+"celebration" | "fireworks" | "lasers" | "love" | "confetti" | "balloons"
+```
+
+```ts Screen effects
+// Fill the whole screen
+"spotlight" | "echo" | "invisible" | "gentle" | "loud" | "slam"
+```
+</CodeGroup>
+
+<Tip>
+Send styles are silently ignored on channels that don't support them, so you can pass a style without branching on the channel.
+</Tip>
+
+## Sending to multiple recipients
+
+Pass `recipients` instead of (or in addition to) `toNumber` to reach multiple phone numbers in a single call:
+
+```ts
+await agentphone.sendMessage(ctx, {
+  recipients: ["+15555550101", "+15555550102", "+15555550103"],
+  body: "The event starts at 7 PM — see you there!",
+  mediaUrls: ["https://example.com/event-banner.jpg"],
+});
+```
+
+## Sending an iMessage reaction
+
+Use `sendReaction` to react to a message by its provider ID. The `reaction` field accepts any emoji string.
+
+```ts
+await agentphone.sendReaction(ctx, {
+  messageId: "msg_123",
+  reaction: "❤️",
+});
+```
+
+## `SendMessageResult` response
+
+A successful send returns a `SendMessageResult`:
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | `string` | Provider message ID. |
+| `status` | `string` | Initial delivery status (e.g. `"queued"`, `"sent"`). |
+| `channel` | `string` | Resolved channel (`"sms"`, `"mms"`, `"imessage"`, `"whatsapp"`). |
+| `from_number` | `string` | The number the message was sent from. |
+| `to_number` | `string` | The number the message was delivered to. |
+| `conversation_id` | `string \| null` | The conversation this message belongs to, if resolved. |
+
+<Note>
+A successful send automatically updates the local resource mirror. Messages appear in `listLocalMessagesByConversation` and related queries without a manual sync.
+</Note>
+
+## Need durable, retryable sends?
+
+For appointment reminders, notifications triggered by mutations, or any work where idempotency and retry visibility matter, use the outbound queue instead of calling `sendMessage` directly.
+
+<CardGroup cols={1}>
+  <Card title="Outbound Queue" icon="arrow-right" href="/guides/outbound-queue">
+    Queue messages from a mutation with idempotency keys, configurable retry limits, and observable status.
+  </Card>
+</CardGroup>

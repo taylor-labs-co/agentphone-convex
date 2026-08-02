@@ -1,0 +1,101 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "name": "AgentPhone",
+  "theme": "luma",
+  "logo": {
+    "light": "https://media.brand.dev/074f54d6-3e9d-4927-8e2b-5dd81953ab39.svg",
+    "dark": "https://media.brand.dev/074f54d6-3e9d-4927-8e2b-5dd81953ab39.svg"
+  },
+  "favicon": "https://media.brand.dev/6569d224-0979-49e5-8d14-60785134bd2a.jpg",
+  "colors": {
+    "primary": "#0d5835",
+    "light": "#7cbca0",
+    "dark": "#dbe1de"
+  },
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/taylor-labs-co/agentphone-convex"
+    }
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/component",
+              "concepts/scopes",
+              "concepts/resource-mirrors",
+              "concepts/event-history"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/send-messages",
+              "guides/voice-calls",
+              "guides/webhooks",
+              "guides/outbound-queue",
+              "guides/sync-backfill",
+              "guides/authorization",
+              "guides/test-mode"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Client",
+            "pages": [
+              "api/agentphone-class",
+              "api/configuration"
+            ]
+          },
+          {
+            "group": "Messaging & Calls",
+            "pages": [
+              "api/messages",
+              "api/calls",
+              "api/conversations"
+            ]
+          },
+          {
+            "group": "Webhooks & Queue",
+            "pages": [
+              "api/webhooks",
+              "api/outbound-queue",
+              "api/webhook-deliveries"
+            ]
+          },
+          {
+            "group": "Reactive Reads",
+            "pages": [
+              "api/local-resources",
+              "api/event-queries",
+              "api/sync"
+            ]
+          },
+          {
+            "group": "Agents & Numbers",
+            "pages": [
+              "api/agents",
+              "api/numbers"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

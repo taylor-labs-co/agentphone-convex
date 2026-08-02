@@ -1,0 +1,83 @@
+---
+title: "AgentPhone for Convex"
+sidebarTitle: "Home"
+description: "Add AI-powered messaging and voice to your Convex app with a reactive component, durable outbound queue, and signed webhooks."
+---
+
+`agentphone-convex` is a Convex component that brings [AgentPhone](https://agentphone.ai/) messaging and voice capabilities directly into your Convex backend. It gives you a typed API client, reactive local mirrors of all AgentPhone resources, a durable outbound queue with retries and idempotency, and signed webhook delivery — all with the reactivity and consistency guarantees of Convex.
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="bolt" href="/quickstart">
+    Install the component and send your first message in minutes
+  </Card>
+  <Card title="Core Concepts" icon="book-open" href="/concepts/component">
+    Understand how the component, scopes, and resource mirrors work
+  </Card>
+  <Card title="Guides" icon="map" href="/guides/send-messages">
+    Step-by-step walkthroughs for messaging, calls, webhooks, and queues
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/agentphone-class">
+    Full reference for every method on the AgentPhone client class
+  </Card>
+</CardGroup>
+
+## What's included
+
+<CardGroup cols={2}>
+  <Card title="Messaging & Voice" icon="message" href="/guides/send-messages">
+    Send SMS/MMS, iMessage, and WhatsApp messages, and make or receive AI voice calls
+  </Card>
+  <Card title="Reactive Mirrors" icon="database" href="/concepts/resource-mirrors">
+    Query agents, numbers, conversations, messages, and calls from Convex queries in real time
+  </Card>
+  <Card title="Durable Queue" icon="layer-group" href="/guides/outbound-queue">
+    Enqueue outbound messages and calls from mutations with idempotency and automatic retries
+  </Card>
+  <Card title="Webhooks" icon="webhook" href="/guides/webhooks">
+    Receive signed AgentPhone events with replay protection and synchronous voice responses
+  </Card>
+  <Card title="Event History" icon="clock-rotate-left" href="/concepts/event-history">
+    Browse an immutable, indexed log of all incoming and outgoing AgentPhone events
+  </Card>
+  <Card title="Sync & Backfill" icon="arrows-rotate" href="/guides/sync-backfill">
+    Pull a bounded page of provider data into local mirrors on demand
+  </Card>
+</CardGroup>
+
+## Get started
+
+<Steps>
+  <Step title="Install the package">
+    ```bash
+    npm install agentphone-convex
+    ```
+  </Step>
+  <Step title="Mount the component">
+    Add the component to your `convex/convex.config.ts`:
+    ```ts convex/convex.config.ts
+    import { defineApp } from "convex/server";
+    import agentphone from "agentphone-convex/convex.config.js";
+
+    const app = defineApp();
+    app.use(agentphone);
+    export default app;
+    ```
+  </Step>
+  <Step title="Set your API key">
+    ```bash
+    npx convex env set AGENTPHONE_API_KEY=your_key
+    ```
+  </Step>
+  <Step title="Create a shared client">
+    ```ts convex/agentphone.ts
+    import { AgentPhone } from "agentphone-convex";
+    import { components } from "./_generated/api.js";
+
+    export const agentphone = new AgentPhone(components.agentphone, {
+      defaultAgentId: process.env.AGENTPHONE_AGENT_ID,
+    });
+    ```
+  </Step>
+</Steps>
+
+Follow the [Quickstart](/quickstart) for a complete walkthrough.

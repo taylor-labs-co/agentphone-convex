@@ -1,0 +1,227 @@
+---
+title: "AgentPhoneOptions — Constructor Configuration Reference"
+sidebarTitle: "Configuration"
+description: "All options for the AgentPhone constructor: scope, default IDs, webhook settings, API key, test mode, callbacks, and required environment variables."
+---
+
+You configure the `AgentPhone` client by passing an `AgentPhoneOptions` object as the second argument to the constructor. Every field is optional — the defaults are designed so that a minimal setup with only `AGENTPHONE_API_KEY` set in your Convex environment will work out of the box.
+
+```ts
+import { AgentPhone } from "agentphone-convex";
+import { components } from "./_generated/api.js";
+
+export const agentphone = new AgentPhone(components.agentphone, {
+  scope: "acme-corp",
+  defaultAgentId: process.env.AGENTPHONE_AGENT_ID,
+  defaultNumberId: process.env.AGENTPHONE_NUMBER_ID,
+  webhookToleranceSeconds: 600,
+});
+```
+
+---
+
+## Scope and Identity
+
+<ParamField body="scope" type="string" default="default">
+  Isolates all component records, delivery IDs, webhook secrets, and queue
+  idempotency keys within your Convex deployment. When a single deployment
+  serves multiple AgentPhone projects or tenants, set this to a stable,
+  unique identifier per project — such as a workspace ID — so their data
+  never mixes.
+</ParamField>
+
+<ParamField body="subAccountId" type="string">
+  Sub-account to use for all API calls made through this client. When set,
+  it is automatically forwarded on every request. Individual methods also
+  accept a `subAccountId` override to target a different sub-account for a
+  single call.
+</ParamField>
+
+---
+
+## Default Resource IDs
+
+<ParamField body="defaultAgentId" type="string">
+  Agent ID to use when a method that accepts `agentId` is called without
+  providing one explicitly. Typically loaded from the `AGENTPHONE_AGENT_ID`
+  environment variable (see [Environment Variables](#environment-variables)
+  below). Required by `createOutboundCall`, `createWebCall`, and their
+  enqueue counterparts when no per-call `agentId` is supplied.
+</ParamField>
+
+<ParamField body="defaultNumberId" type="string">
+  Phone number ID to use when a method that accepts `numberId` is called
+  without providing one explicitly. Typically loaded from the
+  `AGENTPHONE_NUMBER_ID` environment variable.
+</ParamField>
+
+---
+
+## HTTP and Webhooks
+
+<ParamField body="httpPrefix" type="string" default="/agentphone">
+  URL path prefix under which `registerRoutes` mounts the webhook endpoint.
+  The full route becomes `{CONVEX_SITE_URL}{httpPrefix}/webhook`. If you
+  mount multiple `AgentPhone` instances on the same HTTP router, each must
+  use a distinct prefix.
+</ParamField>
+
+<ParamField body="webhookToleranceSeconds" type="number" default={300}>
+  Replay protection window in seconds. Webhook deliveries whose
+  `X-Webhook-Timestamp` header is older than this value relative to the
+  current server time are rejected. Increase this if your Convex deployment
+  frequently receives delayed deliveries, or tighten it for stricter security.
+</ParamField>
+
+<ParamField body="AGENTPHONE_WEBHOOK_SECRET" type="string">
+  Hard-codes the webhook signing secret used to verify all incoming
+  deliveries on this client's route, instead of reading the secret stored
+  per-scope in the component database.
+
+  <Note>
+    When you pass `AGENTPHONE_WEBHOOK_SECRET`, the webhook route is bound to
+    this client's configured `scope` and the agent sub-scopes that
+    `configureAgentWebhook` derives from it. Any delivery whose `?scope=`
+    query parameter names a different scope receives a `403` response.
+    To serve multiple independent scopes from a single route, **omit** this
+    option and instead store a dedicated secret for each scope by calling
+    `configureWebhook` or `setWebhookSecret` for each one separately.
+  </Note>
+</ParamField>
+
+---
+
+## API Key and Base URL
+
+<ParamField body="AGENTPHONE_API_KEY" type="string">
+  Overrides the `AGENTPHONE_API_KEY` environment variable for this client
+  instance. Useful when you need a single Convex deployment to manage
+  multiple AgentPhone projects with different API keys. If neither this
+  option nor the environment variable is set, any method that makes a
+  provider call will throw at runtime.
+</ParamField>
+
+<ParamField body="apiBaseUrl" type="string">
+  Overrides the AgentPhone API base URL. Leave unset in production; this
+  option exists for testing against a self-hosted instance or a mock server.
+</ParamField>
+
+---
+
+## Test Mode
+
+<ParamField body="testMode" type="boolean" default={false}>
+  When `true`, every direct and queued provider call is skipped globally.
+  The queue still stores the request and updates local state, but no API
+  call is made and no API key is required. The method returns a
+  `TestModeResult` describing what would have been sent. Individual methods
+  also accept a per-call `testMode` flag that overrides this default.
+</ParamField>
+
+---
+
+## Webhook Callbacks
+
+Assign an internal Convex mutation reference to receive incoming webhook events. All four properties match the `EventHandler` type:
+
+```ts
+type EventHandler = FunctionReference<
+  "mutation",
+  "internal",
+  { event: AgentPhoneEvent },
+  VoiceWebhookResponse | null
+>;
+```
+
+<ParamField body="incomingEventCallback" type="EventHandler">
+  Catch-all internal mutation invoked for every incoming webhook event that
+  does not match a more specific override. When a voice event is received,
+  this mutation runs synchronously inside the event-insert transaction, and
+  its return value is forwarded back to AgentPhone as the voice response.
+  Non-voice events are dispatched asynchronously and retried on failure.
+</ParamField>
+
+<ParamField body="incomingMessageCallback" type="EventHandler">
+  Override for `agent.message` events. When set, it takes precedence over
+  `incomingEventCallback` for that event type only.
+</ParamField>
+
+<ParamField body="reactionCallback" type="EventHandler">
+  Override for `agent.reaction` events (iMessage only).
+</ParamField>
+
+<ParamField body="callEndedCallback" type="EventHandler">
+  Override for `agent.call_ended` events. Receives the full call transcript,
+  duration, sentiment, and outcome in `event.data`.
+</ParamField>
+
+You can set these options at construction time or assign them directly on the
+instance afterward — both are equivalent:
+
+```ts
+// At construction
+export const agentphone = new AgentPhone(components.agentphone, {
+  incomingEventCallback: internal.events.handle,
+  callEndedCallback:     internal.calls.onEnded,
+});
+
+// Or after construction
+agentphone.incomingMessageCallback = internal.messages.onMessage;
+```
+
+---
+
+## Environment Variables
+
+The component reads the following variables from the Convex deployment environment at runtime. Set them with `npx convex env set`.
+
+<ParamField body="AGENTPHONE_API_KEY" type="string" required>
+  Your AgentPhone API key. Every method that makes a live provider call
+  reads this variable unless the `AGENTPHONE_API_KEY` constructor option is
+  set. To add it to your deployment run:
+
+  ```sh
+  npx convex env set AGENTPHONE_API_KEY=your_key
+  ```
+</ParamField>
+
+<ParamField body="CONVEX_SITE_URL" type="string" required>
+  The public HTTPS origin of your Convex deployment's HTTP actions, e.g.
+  `https://happy-animal-123.convex.site`. Required by `configureWebhook` and
+  `configureAgentWebhook` to construct the full webhook URL that is
+  registered with AgentPhone. Convex sets this automatically in hosted
+  deployments; you only need to set it manually in local or self-hosted
+  environments.
+</ParamField>
+
+<ParamField body="AGENTPHONE_AGENT_ID" type="string">
+  Optional. Load this variable in your `convex/agentphone.ts` file and pass
+  its value to `defaultAgentId` so that messaging and call methods work
+  without an explicit agent ID at every call site.
+
+  ```ts
+  export const agentphone = new AgentPhone(components.agentphone, {
+    defaultAgentId: process.env.AGENTPHONE_AGENT_ID,
+  });
+  ```
+</ParamField>
+
+<ParamField body="AGENTPHONE_NUMBER_ID" type="string">
+  Optional. Load this variable in your `convex/agentphone.ts` file and pass
+  its value to `defaultNumberId` so that messaging methods work without an
+  explicit number ID at every call site.
+
+  ```ts
+  export const agentphone = new AgentPhone(components.agentphone, {
+    defaultNumberId: process.env.AGENTPHONE_NUMBER_ID,
+  });
+  ```
+</ParamField>
+
+<Warning>
+  `AGENTPHONE_API_KEY` is read directly from `process.env` inside Convex
+  action and mutation handlers. Never embed it in client-side code or return
+  it from a public Convex function. The queue stores request arguments, not
+  the key itself, so scheduled retries safely re-read it from the environment
+  at execution time.
+</Warning>

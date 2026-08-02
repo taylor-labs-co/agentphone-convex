@@ -1,0 +1,182 @@
+---
+title: "Receive AgentPhone Webhook Events in Your Convex App"
+sidebarTitle: "Webhooks"
+description: "Register a signed webhook endpoint, configure AgentPhone to deliver events, and write typed Convex callbacks for messages, reactions, and voice calls."
+---
+
+AgentPhone pushes real-time events — incoming messages, reactions, and call completions — to your Convex deployment over signed HTTP webhooks. The `agentphone-convex` component handles signature verification, replay protection, and deduplication automatically. You only need to mount the route, point AgentPhone at it, and write your callback logic.
+
+<Steps>
+
+### Register the HTTP route
+
+Add `agentphone.registerRoutes(http)` to your `convex/http.ts` file. This mounts the signed webhook handler at `/agentphone/webhook`.
+
+```ts
+import { httpRouter } from "convex/server";
+import { agentphone } from "./agentphone.js";
+
+const http = httpRouter();
+agentphone.registerRoutes(http);
+
+export default http;
+```
+
+Deploy your backend once after making this change so the route is live before you configure the webhook URL in AgentPhone.
+
+### Configure the webhook on AgentPhone
+
+Run this internal action **once per deployment** to register your Convex site URL with AgentPhone and store the rotating signing secret inside the component:
+
+```ts
+import { v } from "convex/values";
+import { internalAction } from "./_generated/server.js";
+import { agentphone } from "./agentphone.js";
+
+export const configureAgentPhoneWebhook = internalAction({
+  args: {},
+  returns: v.any(),
+  handler: async (ctx) =>
+    await agentphone.configureWebhook(ctx, {
+      contextLimit: 10,
+      timeout: 30,
+    }),
+});
+```
+
+The URL registered is `https://YOUR_CONVEX_SITE/agentphone/webhook?scope=default`. `configureWebhook` derives this URL from `CONVEX_SITE_URL` automatically.
+
+`configureWebhook` options:
+
+| Field | Type | Description |
+|---|---|---|
+| `contextLimit` | `number` | Number of recent conversation messages to include in each event payload (0–50). |
+| `timeout` | `number` | Seconds AgentPhone waits for your webhook to respond (5–120). |
+| `url` | `string` | Override the auto-derived URL if you need a custom endpoint. |
+
+<Tip>
+Use `configureAgentWebhook(ctx, { agentId, contextLimit, timeout })` to register a separate webhook override for a specific agent. Agent-level webhooks use an isolated signing secret scoped to that agent.
+</Tip>
+
+### Set the event callback
+
+Assign an `internalMutation` reference to `agentphone.incomingEventCallback`. The component calls this mutation for every verified event. For voice events, return a `VoiceWebhookResponse`; return `null` for all other events.
+
+```ts
+import { v } from "convex/values";
+import { internalMutation } from "./_generated/server.js";
+import { eventValidator, voiceResponseValidator } from "agentphone-convex";
+import { internal } from "./_generated/api.js";
+import { agentphone } from "./agentphone.js";
+
+agentphone.incomingEventCallback = internal.agentphone.handleEvent;
+
+export const handleEvent = internalMutation({
+  args: { event: eventValidator },
+  returns: v.union(voiceResponseValidator, v.null()),
+  handler: async (_ctx, { event }) => {
+    if (event.event === "agent.message" && event.channel === "voice") {
+      return { text: "Let me check that for you." };
+    }
+    return null;
+  },
+});
+```
+
+</Steps>
+
+## Event types
+
+AgentPhone delivers three event types to your webhook:
+
+| Event type | Description |
+|---|---|
+| `agent.message` | An inbound message or voice utterance received by the agent. The `channel` field indicates `"sms"`, `"imessage"`, `"whatsapp"`, or `"voice"`. |
+| `agent.reaction` | An iMessage reaction sent by the user. |
+| `agent.call_ended` | A voice call ended. The payload includes the full transcript, duration, and call outcome. |
+
+## Specialized callbacks
+
+Instead of handling all event families in one catch-all callback, you can assign narrower callbacks that fire for a specific event family:
+
+```ts
+// Override for agent.message events only
+agentphone.incomingMessageCallback = internal.agentphone.handleMessage;
+
+// Override for agent.reaction events only
+agentphone.reactionCallback = internal.agentphone.handleReaction;
+
+// Override for agent.call_ended events only
+agentphone.callEndedCallback = internal.agentphone.handleCallEnded;
+```
+
+When a specialized callback is set for an event type, it takes precedence over `incomingEventCallback` for that event family. All other event types still fall through to `incomingEventCallback`.
+
+## Voice callback behavior
+
+<Warning>
+Voice callbacks run **synchronously** inside the event-insert transaction. If your callback throws, the entire transaction rolls back — the event is not stored, and AgentPhone receives a non-200 response it will retry. Non-voice callbacks run asynchronously and are retried with exponential backoff before the delivery is marked as a dead letter.
+</Warning>
+
+This synchronous behavior is intentional: it lets you return a `VoiceWebhookResponse` to AgentPhone within the same HTTP round trip, enabling real-time voice flow control.
+
+## `VoiceWebhookResponse` fields
+
+Return one of these fields from a voice callback to influence the active call:
+
+| Field | Type | Description |
+|---|---|---|
+| `text` | `string` | Text for the agent to speak to the caller. |
+| `hangup` | `boolean` | End the call immediately when `true`. |
+| `action` | `"transfer" \| "hangup"` | Structured call action. |
+| `digits` | `string` | DTMF digits to send into the call. |
+| `send_message` | `{ body: string; to?: string }` | Send an SMS during the call. |
+| `interim` | `boolean` | Signal that this is a partial response and more will follow. |
+
+Return `null` for non-voice events or when no action is needed.
+
+## Webhook security
+
+Every request from AgentPhone includes three headers your endpoint verifies automatically:
+
+- **`X-Webhook-Signature`** — HMAC-SHA256 signature of the request body.
+- **`X-Webhook-Timestamp`** — Unix timestamp (seconds) of when the event was sent.
+- **`X-Webhook-ID`** — Unique delivery ID used for deduplication.
+
+The component verifies the signature and rejects requests whose timestamp falls outside a configurable tolerance window (default: 300 seconds). Duplicate delivery IDs are accepted with a 200 response but are not re-processed.
+
+## Manual webhook secret
+
+If you configured the webhook URL directly in the AgentPhone dashboard rather than via `configureWebhook`, store the secret manually:
+
+```ts
+await agentphone.setWebhookSecret(ctx, {
+  secret: "whsec_...",
+  // Pass agentId to store under the agent scope:
+  // agentId: "agent_abc123",
+});
+```
+
+## Inspecting webhook deliveries
+
+Query delivery history and manage failed deliveries from your backend:
+
+```ts
+// List recent deliveries
+const deliveries = await agentphone.listWebhookDeliveries(ctx, { limit: 50 });
+
+// List only failed deliveries
+const failures = await agentphone.listFailedWebhookDeliveries(ctx);
+
+// Replay a specific delivery
+await agentphone.replayWebhookDelivery(ctx, { deliveryId: "del_xyz" });
+
+// Clean up old deliveries
+await agentphone.cleanupWebhookDeliveries(ctx, { olderThanMs: 30 * 24 * 60 * 60 * 1000 });
+```
+
+<CardGroup cols={1}>
+  <Card title="Webhook Deliveries API Reference" icon="book" href="/api/webhook-deliveries">
+    Full reference for delivery status values, replay behavior, and dead-letter management.
+  </Card>
+</CardGroup>

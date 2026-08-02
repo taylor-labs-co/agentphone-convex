@@ -1,0 +1,170 @@
+---
+title: "Backfilling and Syncing AgentPhone Data into Convex"
+sidebarTitle: "Sync & Backfill"
+description: "Pull provider data into local Convex mirrors on demand — ideal for initial migrations, catch-up after downtime, and first-deploy backfills."
+---
+
+The component automatically keeps its local mirrors up to date through webhooks and direct API calls. However, there are situations where you need to seed those mirrors explicitly: an initial deployment before any webhooks have fired, a catch-up after a period of downtime, or a migration from another system. The sync helpers give you a controlled, explicit way to pull bounded pages of provider data into Convex without streaming an unbounded dataset in a single operation.
+
+## When to use sync
+
+<CardGroup cols={3}>
+  <Card title="First deploy" icon="rocket">
+    Populate the local mirrors immediately after mounting the component so your app has data to work with before any webhooks arrive.
+  </Card>
+  <Card title="Catch-up after downtime" icon="clock-rotate-left">
+    Re-sync specific resources after a period when your Convex deployment was offline and missed incoming events.
+  </Card>
+  <Card title="Data migration" icon="database">
+    Backfill historical messages, calls, or conversations when moving an existing project onto the component.
+  </Card>
+</CardGroup>
+
+## Available sync helpers
+
+Each helper fetches one bounded page from the AgentPhone API, normalizes the records into the component's scoped tables, and returns a `SyncResult`.
+
+| Method | What it syncs |
+|---|---|
+| `syncAgents` | Agent definitions |
+| `syncNumbers` | Phone numbers |
+| `syncConversations` | Conversation records |
+| `syncMessages` | Messages (optionally filtered by conversation or number) |
+| `syncCalls` | Call records (optionally filtered by agent, number, status, direction, or search) |
+
+## How sync works
+
+Every sync helper is an action that calls the provider, normalizes the response, upserts records into the component tables under the client's configured scope, and returns `{ synced, response }`. The `synced` count tells you how many records were written or updated. The `response` field is the raw normalized provider response, which you can inspect or forward.
+
+## Backfill example
+
+```ts
+export const backfillMessages = internalAction({
+  args: { conversationId: v.string() },
+  returns: v.any(),
+  handler: async (ctx, args) => {
+    const { synced } = await agentphone.syncMessages(ctx, {
+      conversationId: args.conversationId,
+      limit: 100,
+    });
+    return { synced };
+  },
+});
+```
+
+## Pagination arguments
+
+Most sync helpers use offset-based pagination. `syncMessages` is the exception — it uses cursor-based pagination with `before` and `after` timestamps instead of `offset`.
+
+**Offset-based helpers** (`syncAgents`, `syncNumbers`, `syncConversations`, `syncCalls`):
+
+| Field | Type | Description |
+|---|---|---|
+| `limit` | `number` | Maximum records to fetch in this page. |
+| `offset` | `number` | Zero-based offset for the provider query. |
+
+**Cursor-based helper** (`syncMessages`):
+
+| Field | Type | Description |
+|---|---|---|
+| `limit` | `number` | Maximum records to fetch in this page. |
+| `before` | `string` | ISO 8601 timestamp upper bound. |
+| `after` | `string` | ISO 8601 timestamp lower bound. |
+
+## SyncResult
+
+Every sync helper returns a `SyncResult<T>` where `T` is the normalized provider response type.
+
+```ts
+interface SyncResult<T = unknown> {
+  synced: number;   // records written or updated in Convex
+  response: T;      // raw normalized provider response
+}
+```
+
+## Filter arguments by resource
+
+Different sync helpers accept additional filter arguments to narrow the page of data fetched from the provider.
+
+<Tabs>
+  <Tab title="syncConversations">
+    ```ts
+    await agentphone.syncConversations(ctx, {
+      agentId: "agt_abc123",   // only conversations for this agent
+      numberId: "num_xyz789",  // only conversations for this number
+      limit: 50,
+    });
+    ```
+
+    | Argument | Type | Description |
+    |---|---|---|
+    | `agentId` | `string` | Filter to conversations belonging to a specific agent. |
+    | `numberId` | `string` | Filter to conversations belonging to a specific phone number. |
+  </Tab>
+  <Tab title="syncMessages">
+    ```ts
+    await agentphone.syncMessages(ctx, {
+      conversationId: "conv_abc123",
+      before: "2024-06-01T00:00:00Z",
+      after: "2024-05-01T00:00:00Z",
+      limit: 100,
+    });
+    ```
+
+    | Argument | Type | Description |
+    |---|---|---|
+    | `conversationId` | `string` | Filter to messages in a specific conversation. |
+    | `numberId` | `string` | Filter to messages through a specific number. |
+    | `before` | `string` | ISO 8601 timestamp upper bound. |
+    | `after` | `string` | ISO 8601 timestamp lower bound. |
+  </Tab>
+  <Tab title="syncCalls">
+    ```ts
+    await agentphone.syncCalls(ctx, {
+      agentId: "agt_abc123",
+      direction: "outbound",
+      status: "completed",
+      limit: 50,
+    });
+    ```
+
+    | Argument | Type | Description |
+    |---|---|---|
+    | `agentId` | `string` | Filter to calls handled by a specific agent. |
+    | `numberId` | `string` | Filter to calls through a specific number. |
+    | `status` | `string` | Filter by call status (e.g. `"completed"`, `"failed"`). |
+    | `direction` | `string` | Filter by direction: `"inbound"`, `"outbound"`, or `"web"`. |
+    | `search` | `string` | Free-text search across call records. |
+  </Tab>
+</Tabs>
+
+## Pagination and rate limits
+
+Sync operations are explicit and bounded — the component never automatically pages through all provider records. To backfill a large dataset, schedule your own iteration loop, incrementing `offset` by `limit` on each step and stopping when `synced` returns fewer records than you requested.
+
+```ts
+export const paginatedBackfill = internalAction({
+  args: { offset: v.number() },
+  returns: v.any(),
+  handler: async (ctx, args) => {
+    const limit = 50;
+    const { synced } = await agentphone.syncConversations(ctx, {
+      limit,
+      offset: args.offset,
+    });
+    // Schedule the next page if this one was full
+    if (synced === limit) {
+      await ctx.scheduler.runAfter(
+        1000,
+        internal.agentphone.paginatedBackfill,
+        { offset: args.offset + limit },
+      );
+    }
+    return { synced };
+  },
+});
+```
+
+<Tip>
+  Local mirrors also update automatically from incoming webhooks. Sync is mainly useful for initial backfills and catch-up scenarios — once your deployment is live and receiving webhooks, you rarely need to call these helpers explicitly.
+</Tip>

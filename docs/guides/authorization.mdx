@@ -1,0 +1,130 @@
+---
+title: "Securing Access to AgentPhone Data in Convex Queries"
+sidebarTitle: "Authorization"
+description: "Use scope access guards and JWT claim checks to protect public Convex queries that return AgentPhone data from unauthorized callers."
+---
+
+Component scopes give you strong isolation between different AgentPhone projects or tenants sharing a single Convex deployment, but scopes alone do not authorize your application's users. Any public Convex function that returns AgentPhone data must independently verify that the caller has permission to access it. The `agentphone-convex` package includes a fail-closed helper for applications that encode access in JWT claims, and guidance on when a more thorough membership check is the right approach instead.
+
+## The authorization boundary
+
+When you create an `AgentPhone` client with a `scope` option, all records — agents, numbers, conversations, messages, calls, events, webhook deliveries, and outbound requests — are stored under that scope. Queries for one scope never return records from another.
+
+<Warning>
+  Scope isolation is not user authorization. A caller who can invoke your public Convex query can read all data in that scope unless you add an explicit access check. Checking only that a user is authenticated is not sufficient when multiple users or tenants share a deployment.
+</Warning>
+
+## requireAgentPhoneScopeAccess
+
+For applications that encode workspace access in JWT claims, the package ships `requireAgentPhoneScopeAccess` — a fail-closed helper that throws immediately if the caller is unauthenticated or if the required scope is absent from their token.
+
+```ts
+import { requireAgentPhoneScopeAccess } from "agentphone-convex";
+
+export const recentEvents = query({
+  args: { limit: v.optional(v.number()) },
+  returns: v.array(storedEventValidator),
+  handler: async (ctx, args) => {
+    await requireAgentPhoneScopeAccess(ctx, { scope: agentphone.scope });
+    return await agentphone.listEvents(ctx, args);
+  },
+});
+```
+
+The helper:
+
+1. Calls `ctx.auth.getUserIdentity()` and throws `"Not authenticated"` if it returns `null`.
+2. Reads the `agentphone_scopes` JWT claim from the identity object.
+3. Accepts a single scope string or an array of scope strings in that claim.
+4. Throws `"Not authorized"` if the required scope is not present.
+5. Returns the `UserIdentity` on success so you can inspect other claim fields if needed.
+
+## AgentPhoneScopeAccessOptions
+
+```ts
+interface AgentPhoneScopeAccessOptions {
+  scope: string;
+  /** Custom JWT claim containing one scope or an array of scopes. */
+  claim?: string;
+}
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `scope` | `string` | — | The scope string to require. Typically `agentphone.scope`. |
+| `claim` | `string` | `"agentphone_scopes"` | JWT claim name to read from the identity. |
+
+## DEFAULT_AGENTPHONE_SCOPE_CLAIM
+
+The package exports this constant for use when you need to reference the default claim name explicitly.
+
+```ts
+import { DEFAULT_AGENTPHONE_SCOPE_CLAIM } from "agentphone-convex";
+// "agentphone_scopes"
+```
+
+## Custom JWT claim
+
+If your auth provider uses a different claim name, pass it as `claim`:
+
+```ts
+await requireAgentPhoneScopeAccess(ctx, {
+  scope: agentphone.scope,
+  claim: "my_custom_claim",
+});
+```
+
+The claim value may be a single string or a JSON array of strings. Any other shape is treated as an empty list, which causes the helper to throw.
+
+## When NOT to use this helper
+
+`requireAgentPhoneScopeAccess` is designed for apps that issue JWTs with workspace or scope identifiers embedded as claims. If your app manages memberships in a Convex table instead, use an indexed membership lookup rather than — or in addition to — checking the JWT claim.
+
+```ts
+// Example: app-level membership check (not from agentphone-convex)
+export const recentEvents = query({
+  args: { workspaceId: v.string(), limit: v.optional(v.number()) },
+  returns: v.array(storedEventValidator),
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Not authenticated");
+
+    // Verify the caller is a member of the requested workspace
+    const membership = await ctx.db
+      .query("memberships")
+      .withIndex("by_user_workspace", (q) =>
+        q.eq("userId", identity.subject).eq("workspaceId", args.workspaceId),
+      )
+      .unique();
+    if (!membership) throw new Error("Not authorized");
+
+    return await agentphone.listEvents(ctx, { limit: args.limit });
+  },
+});
+```
+
+<Note>
+  Checking only `ctx.auth.getUserIdentity() !== null` tells you a user is signed in, but not which resources they may access. In a multi-tenant deployment where many users share one Convex app, every authenticated user would be able to call a query that only checks for a non-null identity.
+</Note>
+
+## Multi-tenant setups
+
+When a single Convex app serves multiple AgentPhone projects or customers, create one `AgentPhone` client per tenant with a stable identifier as the scope — a workspace ID, organization ID, or similar opaque string that does not change over time.
+
+```ts
+// convex/agentphone.ts — factory function for per-tenant clients
+import { AgentPhone } from "agentphone-convex";
+import { components } from "./_generated/api.js";
+
+export function agentphoneForTenant(workspaceId: string) {
+  return new AgentPhone(components.agentphone, {
+    scope: workspaceId,
+  });
+}
+```
+
+When issuing JWTs, include the user's allowed workspace IDs in the `agentphone_scopes` claim. The `requireAgentPhoneScopeAccess` helper will verify that the caller's token contains the scope for the specific tenant's data they are requesting.
+
+<Tip>
+  Scope strings are arbitrary — pick something stable and human-readable like `"workspace_01JABCDEF"`. Avoid using values that could change over time (such as a display name or email address) because changing a scope orphans all previously stored records under the old value.
+</Tip>
