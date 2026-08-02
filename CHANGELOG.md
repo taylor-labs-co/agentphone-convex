@@ -21,6 +21,9 @@
   agent webhook configuration and delivery already use.
 - Retry outbound queue work only for transport failures so a post-send write
   failure can no longer resend an accepted message or call.
+- Accept agent scopes derived from the configured scope on the webhook route
+  when a global webhook secret override is set, while still rejecting scopes
+  owned by another tenant.
 
 ## 0.2.0
 

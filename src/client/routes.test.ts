@@ -106,6 +106,43 @@ describe("AgentPhone.registerRoutes webhook scope binding", () => {
     );
   });
 
+  test("accepts an agent scope derived from the configured scope", async () => {
+    const handler = registerWebhookRoute({
+      scope: "tenant-alpha",
+      secretOverride: "global-secret",
+    });
+    const ctx = actionContext();
+
+    const response = await handler._handler(
+      ctx,
+      webhookRequest("tenant-alpha:agent:agt_123"),
+    );
+
+    expect(response.status).toBe(200);
+    expect(ctx.runAction).toHaveBeenCalledWith(
+      "webhooks:handle",
+      expect.objectContaining({ scope: "tenant-alpha:agent:agt_123" }),
+    );
+  });
+
+  test("rejects agent scopes belonging to another tenant", async () => {
+    const handler = registerWebhookRoute({
+      scope: "tenant-alpha",
+      secretOverride: "global-secret",
+    });
+    const ctx = actionContext();
+
+    for (const scope of [
+      "tenant-bravo:agent:agt_123",
+      "tenant-alpha-two",
+      "tenant-alpha:agent:",
+    ]) {
+      const response = await handler._handler(ctx, webhookRequest(scope));
+      expect(response.status).toBe(403);
+    }
+    expect(ctx.runAction).not.toHaveBeenCalled();
+  });
+
   test("preserves per-scope stored-secret routing without an override", async () => {
     const handler = registerWebhookRoute({ scope: "tenant-alpha" });
     const ctx = actionContext();

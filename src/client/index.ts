@@ -162,7 +162,7 @@ export class AgentPhone {
         if (
           usesSecretOverride &&
           requestedScope !== null &&
-          requestedScope !== this.scope
+          !this.ownsScope(requestedScope)
         ) {
           return jsonResponse(
             { error: "Webhook scope does not match configured scope" },
@@ -170,9 +170,7 @@ export class AgentPhone {
           );
         }
 
-        const scope = usesSecretOverride
-          ? this.scope
-          : (requestedScope ?? this.scope);
+        const scope = requestedScope ?? this.scope;
         const rawBody = await request.text();
         const eventType =
           request.headers.get("X-Webhook-Event") ?? readEventType(rawBody);
@@ -1441,6 +1439,18 @@ export class AgentPhone {
 
   private agentScope(agentId: string) {
     return `${this.scope}:agent:${agentId}`;
+  }
+
+  /**
+   * Whether a webhook query scope belongs to this client: its own scope, or one
+   * of the agent scopes `configureAgentWebhook` derives from it.
+   */
+  private ownsScope(scope: string) {
+    const agentPrefix = `${this.scope}:agent:`;
+    return (
+      scope === this.scope ||
+      (scope.startsWith(agentPrefix) && scope.length > agentPrefix.length)
+    );
   }
 }
 

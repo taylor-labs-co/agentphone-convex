@@ -122,10 +122,10 @@ alias. Use `configureAgentWebhook(ctx, { agentId })` for an agent override, or
 `configureAgentWebhook` uses, so agent deliveries verify against it.
 
 Passing `AGENTPHONE_WEBHOOK_SECRET` directly to the client binds that webhook
-route to the client's configured scope; requests naming another scope receive a
-`403` response. To serve multiple scopes from one route, omit the global
-override and store a separate secret for every scope with `configureWebhook` or
-`setWebhookSecret`.
+route to the client's configured scope and the agent scopes derived from it;
+requests naming another scope receive a `403` response. To serve multiple scopes
+from one route, omit the global override and store a separate secret for every
+scope with `configureWebhook` or `setWebhookSecret`.
 
 Callbacks are internal mutations:
 
