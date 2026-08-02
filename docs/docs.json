@@ -1,6 +1,6 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "name": "AgentPhone",
+  "name": "AgentPhone Convex Component",
   "theme": "luma",
   "logo": {
     "light": "/logo/light.svg",
