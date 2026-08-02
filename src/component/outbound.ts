@@ -6,7 +6,8 @@ import {
   mutation,
   query,
 } from "./_generated/server.js";
-import type { MutationCtx } from "./_generated/server.js";
+import type { ActionCtx, MutationCtx } from "./_generated/server.js";
+import type { Id } from "./_generated/dataModel.js";
 import schema from "./schema.js";
 import { AgentPhoneApiError, agentPhoneRequest } from "./request.js";
 import {
@@ -240,8 +241,19 @@ export const processRequest = internalAction({
             idempotencyKey: args.requestId,
           });
     } catch (error) {
-      // Only send failures reach this branch, so retrying cannot submit an
-      // already-recorded request a second time.
+      // A success status with an unreadable body still means AgentPhone
+      // accepted the request, so record it instead of sending it again.
+      if (error instanceof AgentPhoneApiError && isAccepted(error.status)) {
+        await recordSent(
+          ctx,
+          args.requestId,
+          null,
+          `AgentPhone accepted this request but its response could not be read: ${errorMessage(error)}`,
+        );
+        return null;
+      }
+      // Every other failure means the send did not complete, so retrying it
+      // cannot submit an already-accepted request a second time.
       const retry =
         claimed.attempt < claimed.maxAttempts && isRetryableError(error);
       const delayMs = retryDelayMs(claimed.attempt);
@@ -263,38 +275,7 @@ export const processRequest = internalAction({
 
     // AgentPhone accepted the request. Everything below only persists that
     // outcome, so failures here are never retried through the send path.
-    try {
-      await ctx.runMutation(internal.outbound.markSent, {
-        requestId: args.requestId,
-        result,
-      });
-    } catch (error) {
-      // The send already happened, so the request still has to reach a
-      // terminal state. Record it without the provider payload, which is the
-      // part that can fail to store, and schedule that write if it also fails.
-      const fallback = {
-        requestId: args.requestId,
-        result: null,
-        error: `AgentPhone accepted this request but its result could not be stored: ${errorMessage(error)}`,
-      };
-      console.error(
-        "AgentPhone request sent but recording its result failed",
-        error,
-      );
-      try {
-        await ctx.runMutation(internal.outbound.markSent, fallback);
-      } catch (fallbackError) {
-        console.error(
-          "AgentPhone request sent but marking it sent failed; retrying the write",
-          fallbackError,
-        );
-        await ctx.scheduler.runAfter(
-          PERSIST_RETRY_DELAY_MS,
-          internal.outbound.markSent,
-          fallback,
-        );
-      }
-    }
+    await recordSent(ctx, args.requestId, result);
 
     try {
       if (claimed.kind === "message") {
@@ -503,6 +484,54 @@ function isRetryableError(error: unknown) {
     return error.status === 408 || error.status === 429 || error.status >= 500;
   }
   return true;
+}
+
+/**
+ * Record an accepted send. The provider payload is the part that can fail to
+ * store, so a failed write falls back to a payload-free terminal state and, if
+ * even that fails, schedules the same write rather than resending.
+ */
+async function recordSent(
+  ctx: ActionCtx,
+  requestId: Id<"outboundRequests">,
+  result: unknown,
+  error?: string,
+) {
+  try {
+    await ctx.runMutation(
+      internal.outbound.markSent,
+      stripUndefined({ requestId, result, error }),
+    );
+    return;
+  } catch (writeError) {
+    console.error(
+      "AgentPhone request sent but recording its result failed",
+      writeError,
+    );
+    const fallback = {
+      requestId,
+      result: null,
+      error: `AgentPhone accepted this request but its result could not be stored: ${errorMessage(writeError)}`,
+    };
+    try {
+      await ctx.runMutation(internal.outbound.markSent, fallback);
+    } catch (fallbackError) {
+      console.error(
+        "AgentPhone request sent but marking it sent failed; retrying the write",
+        fallbackError,
+      );
+      await ctx.scheduler.runAfter(
+        PERSIST_RETRY_DELAY_MS,
+        internal.outbound.markSent,
+        fallback,
+      );
+    }
+  }
+}
+
+/** Whether AgentPhone answered with a success status. */
+function isAccepted(status: number) {
+  return status >= 200 && status < 300;
 }
 
 function errorMessage(error: unknown) {

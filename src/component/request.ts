@@ -73,7 +73,11 @@ export async function agentPhoneRequest(
   const response = await fetch(url, init);
   const contentType = response.headers.get("content-type") ?? "";
   const responseText = await response.text();
-  const responseBody = parseResponseBody(responseText, contentType);
+  const responseBody = parseResponseBody(
+    responseText,
+    contentType,
+    response.status,
+  );
 
   if (!response.ok) {
     const detail =
@@ -115,7 +119,11 @@ function ensureTrailingSlash(value: string) {
   return value.endsWith("/") ? value : `${value}/`;
 }
 
-function parseResponseBody(text: string, contentType: string): unknown {
+function parseResponseBody(
+  text: string,
+  contentType: string,
+  status: number,
+): unknown {
   if (!text) {
     return null;
   }
@@ -123,7 +131,12 @@ function parseResponseBody(text: string, contentType: string): unknown {
     try {
       return JSON.parse(text) as unknown;
     } catch {
-      throw new Error("AgentPhone returned an invalid JSON response");
+      // Carry the status so callers can tell an unreadable response to an
+      // accepted request apart from a failed request.
+      throw new AgentPhoneApiError(
+        `AgentPhone returned an invalid JSON response (${status})`,
+        status,
+      );
     }
   }
   return text;

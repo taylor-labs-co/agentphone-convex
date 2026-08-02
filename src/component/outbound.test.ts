@@ -46,6 +46,37 @@ describe("durable outbound queue", () => {
     expect(status?.error).toContain("could not be stored");
   });
 
+  test("records an accepted send whose response cannot be parsed", async () => {
+    vi.useFakeTimers();
+    vi.stubEnv("AGENTPHONE_API_KEY", "test_token");
+    const fetchMock = vi.fn(
+      async () =>
+        new Response("{not json", {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const testConvex = initConvexTest();
+
+    const queued = await testConvex.mutation(api.outbound.enqueueMessage, {
+      scope: "default",
+      agentId: "agt_123",
+      toNumber: "+15550000002",
+      body: "Accepted but unreadable",
+      maxAttempts: 3,
+    });
+    await testConvex.finishAllScheduledFunctions(vi.runAllTimers);
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const status = await testConvex.query(api.outbound.getStatus, {
+      scope: "default",
+      requestId: queued.requestId,
+    });
+    expect(status).toMatchObject({ status: "sent", attempts: 1, result: null });
+    expect(status?.error).toContain("could not be read");
+  });
+
   test("retries transport failures until maxAttempts is exhausted", async () => {
     vi.useFakeTimers();
     vi.stubEnv("AGENTPHONE_API_KEY", "test_token");

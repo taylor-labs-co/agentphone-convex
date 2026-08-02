@@ -21,6 +21,8 @@
   agent webhook configuration and delivery already use.
 - Retry outbound queue work only for transport failures so a post-send write
   failure can no longer resend an accepted message or call.
+- Treat a success response with an unreadable body as accepted, so a queued
+  request whose response cannot be parsed is recorded rather than resent.
 - Record an accepted outbound send as `sent` with the storage error even when
   its provider result cannot be written, instead of leaving the request stuck in
   `sending`.
