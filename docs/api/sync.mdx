@@ -1,0 +1,232 @@
+---
+title: "Sync API — Backfill AgentPhone Resources on Demand"
+sidebarTitle: "Sync"
+description: "Backfill agents, numbers, conversations, messages, and calls from the AgentPhone API into your local Convex mirrors with explicit, paginated sync helpers."
+---
+
+The sync helpers let you pull provider data into your local resource mirrors whenever you need it — on deploy, on a schedule, or in response to a user action. Each helper fetches one bounded page from the AgentPhone API, normalizes and upserts the records into the component's Convex tables, and returns the number of records stored alongside the raw provider response. Pagination is intentionally explicit so you can schedule your own backfill cadence and respect AgentPhone rate limits.
+
+<Warning>
+  Sync methods require an `ActionCtx` because they call the AgentPhone API. You cannot call them from a query or plain mutation.
+</Warning>
+
+---
+
+## `SyncResult` Type
+
+Every sync method returns a `SyncResult<T>` object.
+
+<ResponseField name="synced" type="number">
+  The number of records that were upserted into the local Convex mirror during this call.
+</ResponseField>
+
+<ResponseField name="response" type="T">
+  The raw response body from the AgentPhone API for this page, typed as the generic parameter `T` (defaults to `unknown`).
+</ResponseField>
+
+---
+
+## `syncAgents`
+
+Fetches one page of agents from the AgentPhone API and upserts them into the local agents mirror.
+
+```ts
+const { synced } = await agentphone.syncAgents(ctx, { limit: 100 });
+```
+
+**Parameters**
+
+<ParamField body="ctx" type="ActionCtx" required>
+  A Convex action context.
+</ParamField>
+
+<ParamField body="limit" type="number">
+  Maximum number of agents to fetch from the provider in this page.
+</ParamField>
+
+<ParamField body="offset" type="number">
+  Number of records to skip for pagination. Use with `limit` to page through all agents.
+</ParamField>
+
+**Returns** `SyncResult`
+
+---
+
+## `syncNumbers`
+
+Fetches one page of phone numbers from the AgentPhone API and upserts them into the local numbers mirror.
+
+```ts
+const { synced } = await agentphone.syncNumbers(ctx, { limit: 100 });
+```
+
+**Parameters**
+
+<ParamField body="ctx" type="ActionCtx" required>
+  A Convex action context.
+</ParamField>
+
+<ParamField body="limit" type="number">
+  Maximum number of numbers to fetch from the provider in this page.
+</ParamField>
+
+<ParamField body="offset" type="number">
+  Number of records to skip for pagination.
+</ParamField>
+
+**Returns** `SyncResult`
+
+---
+
+## `syncConversations`
+
+Fetches one page of conversations from the AgentPhone API and upserts them into the local conversations mirror. Optionally scoped to a specific agent or number.
+
+```ts
+const { synced } = await agentphone.syncConversations(ctx, {
+  agentId: "agt_abc123",
+  limit: 50,
+});
+```
+
+**Parameters**
+
+<ParamField body="ctx" type="ActionCtx" required>
+  A Convex action context.
+</ParamField>
+
+<ParamField body="agentId" type="string">
+  Restrict the sync to conversations belonging to this agent.
+</ParamField>
+
+<ParamField body="numberId" type="string">
+  Restrict the sync to conversations belonging to this phone number.
+</ParamField>
+
+<ParamField body="limit" type="number">
+  Maximum number of conversations to fetch from the provider in this page.
+</ParamField>
+
+<ParamField body="offset" type="number">
+  Number of records to skip for pagination.
+</ParamField>
+
+**Returns** `SyncResult`
+
+---
+
+## `syncMessages`
+
+Fetches one page of messages from the AgentPhone API and upserts them into the local messages mirror. You must provide exactly one of `conversationId` or `numberId`.
+
+```ts
+const { synced } = await agentphone.syncMessages(ctx, {
+  conversationId: "conv_abc123",
+  limit: 100,
+});
+```
+
+**Parameters**
+
+<ParamField body="ctx" type="ActionCtx" required>
+  A Convex action context.
+</ParamField>
+
+<ParamField body="conversationId" type="string">
+  Fetch messages for this conversation. Mutually exclusive with `numberId`.
+</ParamField>
+
+<ParamField body="numberId" type="string">
+  Fetch messages for this phone number. Mutually exclusive with `conversationId`.
+</ParamField>
+
+<ParamField body="limit" type="number">
+  Maximum number of messages to fetch from the provider in this page.
+</ParamField>
+
+<ParamField body="before" type="string">
+  Cursor for fetching messages before this point in time (ISO 8601 or provider cursor).
+</ParamField>
+
+<ParamField body="after" type="string">
+  Cursor for fetching messages after this point in time (ISO 8601 or provider cursor).
+</ParamField>
+
+**Returns** `SyncResult`
+
+---
+
+## `syncCalls`
+
+Fetches one page of calls from the AgentPhone API and upserts them into the local calls mirror. When `numberId` is provided the request is scoped to that number's call list; when `agentId` is provided it uses the agent's call list; otherwise it fetches from the global calls endpoint.
+
+```ts
+const { synced } = await agentphone.syncCalls(ctx, {
+  agentId: "agt_abc123",
+  status: "completed",
+  limit: 50,
+});
+```
+
+**Parameters**
+
+<ParamField body="ctx" type="ActionCtx" required>
+  A Convex action context.
+</ParamField>
+
+<ParamField body="agentId" type="string">
+  Restrict the sync to calls belonging to this agent.
+</ParamField>
+
+<ParamField body="numberId" type="string">
+  Restrict the sync to calls belonging to this phone number. Takes precedence over `agentId` when both are supplied.
+</ParamField>
+
+<ParamField body="status" type="string">
+  Filter calls by status (e.g. `"completed"`, `"failed"`).
+</ParamField>
+
+<ParamField body="direction" type="string">
+  Filter calls by direction (`"inbound"`, `"outbound"`, or `"web"`).
+</ParamField>
+
+<ParamField body="search" type="string">
+  Free-text search string passed to the AgentPhone API.
+</ParamField>
+
+<ParamField body="limit" type="number">
+  Maximum number of calls to fetch from the provider in this page.
+</ParamField>
+
+<ParamField body="offset" type="number">
+  Number of records to skip for pagination.
+</ParamField>
+
+**Returns** `SyncResult`
+
+---
+
+## Backfill Example
+
+The following example shows a Convex internal action that runs a full initial backfill of agents, numbers, and recent conversations.
+
+```ts
+import { v } from "convex/values";
+import { internalAction } from "./_generated/server.js";
+import { agentphone } from "./agentphone.js";
+
+export const backfill = internalAction({
+  args: {},
+  returns: v.null(),
+  handler: async (ctx) => {
+    await agentphone.syncAgents(ctx, { limit: 100 });
+    await agentphone.syncNumbers(ctx, { limit: 100 });
+    await agentphone.syncConversations(ctx, { limit: 100 });
+    return null;
+  },
+});
+```
+
+<Tip>
+  Run the backfill action once after initial setup to populate your local mirrors. After that, incoming webhooks keep the mirrors up to date automatically.
+</Tip>

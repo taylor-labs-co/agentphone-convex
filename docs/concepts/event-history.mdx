@@ -1,0 +1,98 @@
+---
+title: "Event History: Immutable Log of All AgentPhone Activity"
+sidebarTitle: "Event History"
+description: "Explore the append-only event log that captures every incoming webhook and outgoing API call, and learn how to query it for debugging and auditing."
+---
+
+Alongside the latest-state resource mirrors, the component maintains a separate, append-only event log. Every verified incoming webhook and every successful outgoing API call appends an immutable record to this log. Unlike the mirrors — which are overwritten each time a resource changes — the event log grows without bound and preserves the full history of what happened and when.
+
+## The `StoredEvent` shape
+
+Each entry in the event log is a `StoredEvent`. The fields capture everything you need to trace an event back to its origin or correlate it with other records:
+
+| Field | Type | Description |
+|---|---|---|
+| `scope` | `string` | The scope this event belongs to. |
+| `source` | `"webhook" \| "api"` | Whether the event came in via webhook or was recorded from an outgoing API call. |
+| `deliveryId` | `string?` | For webhook events, the unique delivery ID from the `X-Webhook-ID` header. |
+| `eventType` | `string` | The event name, e.g. `"agent.message"` or `"agent.call_ended"`. |
+| `channel` | `string?` | The communication channel, e.g. `"sms"`, `"imessage"`, or `"voice"`. |
+| `timestamp` | `string` | ISO 8601 timestamp from the event payload. |
+| `receivedAt` | `number` | Unix epoch milliseconds when the component recorded the event. |
+| `agentId` | `string?` | The AgentPhone agent ID associated with the event. |
+| `numberId` | `string?` | The phone number ID associated with the event. |
+| `conversationId` | `string?` | The conversation ID, if applicable. |
+| `callId` | `string?` | The call ID, if applicable. |
+| `messageId` | `string?` | The message ID, if applicable. |
+| `direction` | `string?` | Message or call direction, e.g. `"inbound"` or `"outbound"`. |
+| `payload` | `unknown` | The full raw event payload as received or recorded. |
+
+## Querying the event log
+
+All event queries are available through the `AgentPhone` client from Convex queries, mutations, and actions. Like the mirror reads, they are index-backed, default to 50 records, and reject limits above 100.
+
+### List all events for a conversation
+
+```ts
+const events = await agentphone.listEventsByConversation(ctx, {
+  conversationId: "conv_123",
+  limit: 20,
+});
+```
+
+### Full set of event query methods
+
+| Method | Filters by |
+|---|---|
+| `listEvents(ctx, { limit? })` | All events in the scope |
+| `listIncoming(ctx, { limit? })` | `source = "webhook"` |
+| `listOutgoing(ctx, { limit? })` | `source = "api"` |
+| `listEventsByType(ctx, { eventType, limit? })` | Event type string |
+| `listEventsByAgent(ctx, { agentId, limit? })` | Agent ID |
+| `listEventsByNumber(ctx, { numberId, limit? })` | Number ID |
+| `listEventsByConversation(ctx, { conversationId, limit? })` | Conversation ID |
+| `listEventsByCall(ctx, { callId, limit? })` | Call ID |
+| `getEventByDeliveryId(ctx, { deliveryId })` | Exact webhook delivery ID |
+
+`getEventByDeliveryId` is particularly useful for webhook debugging — if AgentPhone reports a delivery that your system did not process correctly, you can look it up by the provider's delivery ID and inspect the raw payload.
+
+## Use cases
+
+<CardGroup cols={3}>
+  <Card title="Debug webhook delivery" icon="bug">
+    Use `getEventByDeliveryId` or `listIncoming` to verify that a specific webhook was received, deduplicated, and stored. Cross-reference with `listWebhookDeliveries` to see dispatch status.
+  </Card>
+  <Card title="Audit message history" icon="scroll">
+    Use `listEventsByConversation` to reconstruct the full ordered timeline of inbound and outbound messages and reactions for a conversation, including metadata not preserved in the mirror.
+  </Card>
+  <Card title="Replay and reconcile" icon="rotate">
+    Use `listEventsByType` or `listOutgoing` to identify gaps, feed events into your own analytics pipeline, or replay a window of activity after a processing failure.
+  </Card>
+</CardGroup>
+
+## Exported validator
+
+The package exports `storedEventValidator` for use in your own Convex function return types:
+
+```ts
+import { v } from "convex/values";
+import { query } from "./_generated/server.js";
+import {
+  requireAgentPhoneScopeAccess,
+  storedEventValidator,
+} from "agentphone-convex";
+import { agentphone } from "./agentphone.js";
+
+export const recentEvents = query({
+  args: { limit: v.optional(v.number()) },
+  returns: v.array(storedEventValidator),
+  handler: async (ctx, args) => {
+    await requireAgentPhoneScopeAccess(ctx, { scope: agentphone.scope });
+    return await agentphone.listEvents(ctx, args);
+  },
+});
+```
+
+<Note>
+  The event log is append-only and has no built-in expiry. If you accumulate a large volume of events, use `listEventsByType` or `listEventsByConversation` with tight limits to avoid slow reads, and consider running periodic cleanup of records older than your retention window.
+</Note>

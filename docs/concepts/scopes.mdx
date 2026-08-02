@@ -1,0 +1,93 @@
+---
+title: "Scopes: Isolating AgentPhone Data in Convex Deployments"
+sidebarTitle: "Scopes"
+description: "Understand how scopes partition AgentPhone records, webhook secrets, and queue keys within a Convex deployment, and why they are not an auth mechanism."
+---
+
+A scope is a plain string key that partitions every record the component stores — resource mirrors, delivery IDs, webhook signing secrets, and outbound queue idempotency keys — within a single Convex deployment. Every component table includes a `scope` column, and every index is scoped, so data belonging to one scope is never mixed with or visible to another.
+
+## Setting the scope on the client
+
+You pass the scope when constructing the `AgentPhone` client. If you omit it, it defaults to `"default"`.
+
+```ts
+// convex/agentphone.ts
+import { AgentPhone } from "agentphone-convex";
+import { components } from "./_generated/api.js";
+
+export const agentphone = new AgentPhone(components.agentphone, {
+  scope: "default",
+  defaultAgentId: process.env.AGENTPHONE_AGENT_ID,
+  defaultNumberId: process.env.AGENTPHONE_NUMBER_ID,
+});
+```
+
+Every method the client calls — reading mirrors, listing events, verifying webhooks, enqueuing outbound work — automatically stamps the configured scope on every read and write. You never have to pass it manually.
+
+## Multi-tenant deployments
+
+When a single Convex deployment serves multiple AgentPhone projects or workspace tenants, use a stable, non-guessable tenant or workspace ID as the scope instead of `"default"`.
+
+```ts
+// One client per tenant, constructed dynamically or at startup
+const agentphone = new AgentPhone(components.agentphone, {
+  scope: workspaceId, // e.g. "ws_01j9xyz"
+});
+```
+
+This guarantees that all webhook deliveries, mirrored resources, event history, and queue entries for one workspace are completely separate from every other workspace sharing the same deployment.
+
+<Tip>
+  Use a value that is already stable and unique in your data model — a database ID or an external workspace identifier — rather than something derived from user input at runtime.
+</Tip>
+
+## Agent scopes
+
+When you configure a per-agent webhook override with `configureAgentWebhook`, the component stores the signing secret under a derived agent scope rather than the base scope:
+
+```
+"<scope>:agent:<agentId>"
+```
+
+For example, if your base scope is `"acme"` and you call `configureAgentWebhook(ctx, { agentId: "agt_123" })`, the secret is stored under `"acme:agent:agt_123"`. Incoming webhook requests addressed to that agent scope verify against this dedicated secret rather than the project-level one.
+
+You do not need to manage agent scopes manually. The client's `webhookUrl()` helper constructs the correct URL with the right scope query parameter, and the webhook route resolves the scope from the incoming request automatically.
+
+## The authorization boundary
+
+Scopes isolate records from one another, but they do not authorize your application's users. A scope is not a secret and provides no access control on its own. Any public Convex function that returns AgentPhone data must authenticate the caller and verify that the caller has permission to read the requested scope.
+
+For applications that encode workspace access in JWT claims, the package exports a fail-closed helper, `requireAgentPhoneScopeAccess`, that checks for the scope in an `agentphone_scopes` claim:
+
+```ts
+import { v } from "convex/values";
+import { query } from "./_generated/server.js";
+import { requireAgentPhoneScopeAccess, storedEventValidator } from "agentphone-convex";
+import { agentphone } from "./agentphone.js";
+
+export const recentEvents = query({
+  args: { limit: v.optional(v.number()) },
+  returns: v.array(storedEventValidator),
+  handler: async (ctx, args) => {
+    await requireAgentPhoneScopeAccess(ctx, { scope: agentphone.scope });
+    return await agentphone.listEvents(ctx, args);
+  },
+});
+```
+
+If your app stores memberships in Convex tables, replace the JWT helper with an indexed membership lookup against your own data model.
+
+<Note>
+  Checking only that a user is signed in is not sufficient when multiple users or tenants share a deployment. A signed-in user in one workspace should not be able to read another workspace's conversations or event history just because they are authenticated.
+</Note>
+
+## Summary
+
+<CardGroup cols={2}>
+  <Card title="What scopes do" icon="lock">
+    Partition all component records, delivery IDs, signing secrets, and queue keys so that data belonging to different AgentPhone projects never mingles in the same deployment.
+  </Card>
+  <Card title="What scopes do not do" icon="user-slash">
+    Authorize end users. You must authenticate callers and verify scope access in every public Convex function that returns AgentPhone data.
+  </Card>
+</CardGroup>

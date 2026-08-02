@@ -1,0 +1,358 @@
+---
+title: "Agents API — Create, Configure, and Manage Agents"
+sidebarTitle: "Agents"
+description: "List, retrieve, create, update, and delete AgentPhone agents, and browse the voices, conversations, and calls associated with each agent."
+---
+
+The agents methods on the `AgentPhone` client wrap the AgentPhone REST API for agent management. All of these methods make live network calls to the AgentPhone API and must therefore be called from a Convex `ActionCtx`. Successful writes are reflected in the local resource mirror automatically.
+
+<Note>
+  These methods call the AgentPhone API directly. For reading cached agent data without a network round-trip, see [Local Resources](/api/local-resources).
+</Note>
+
+---
+
+## `Agent` Type
+
+<ResponseField name="id" type="string">
+  The AgentPhone agent ID.
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  The display name of the agent.
+</ResponseField>
+
+<ResponseField name="description" type="string | null">
+  An optional description of the agent's purpose.
+</ResponseField>
+
+<ResponseField name="voiceMode" type='"webhook" | "hosted" | string'>
+  How the agent handles voice calls. `"hosted"` runs the agent on AgentPhone's infrastructure; `"webhook"` delivers transcripts to your webhook.
+</ResponseField>
+
+<ResponseField name="voice" type="string">
+  The voice ID used for text-to-speech.
+</ResponseField>
+
+<ResponseField name="createdAt" type="string">
+  ISO 8601 timestamp when the agent was created.
+</ResponseField>
+
+<ResponseField name="systemPrompt" type="string | null | undefined">
+  The system prompt used to configure the agent's behavior.
+</ResponseField>
+
+<ResponseField name="beginMessage" type="string | null | undefined">
+  The first message the agent sends or says when a conversation starts.
+</ResponseField>
+
+<ResponseField name="numbers" type="PhoneNumber[] | null | undefined">
+  Phone numbers currently attached to this agent.
+</ResponseField>
+
+---
+
+## `listAgents`
+
+Returns a paginated list of all agents in your AgentPhone account.
+
+```ts
+const response = await agentphone.listAgents(ctx, { offset: 0 });
+const agents = response.data ?? response.agents ?? [];
+```
+
+**Parameters**
+
+<ParamField body="ctx" type="ActionCtx" required>
+  A Convex action context.
+</ParamField>
+
+<ParamField body="offset" type="number">
+  Number of agents to skip for pagination.
+</ParamField>
+
+**Returns** `AgentListResponse`
+
+<ResponseField name="data" type="Agent[] | undefined">
+  The list of agents (present in current API versions).
+</ResponseField>
+
+<ResponseField name="agents" type="Agent[] | undefined">
+  Alternate field name for the list of agents (present in some API versions).
+</ResponseField>
+
+<ResponseField name="total" type="number | undefined">
+  Total number of agents in the account.
+</ResponseField>
+
+---
+
+## `getAgent`
+
+Returns a single agent by its ID.
+
+```ts
+const agent = await agentphone.getAgent(ctx, { agentId: "agt_abc123" });
+```
+
+**Parameters**
+
+<ParamField body="ctx" type="ActionCtx" required>
+  A Convex action context.
+</ParamField>
+
+<ParamField body="agentId" type="string" required>
+  The AgentPhone agent ID to retrieve.
+</ParamField>
+
+**Returns** `Agent`
+
+---
+
+## `createAgent`
+
+Creates a new agent with the given configuration. Returns the created agent.
+
+```ts
+const agent = await agentphone.createAgent(ctx, {
+  name: "Support Bot",
+  systemPrompt: "You are a helpful customer support assistant.",
+  voiceMode: "hosted",
+  modelTier: "balanced",
+  beginMessage: "Hi! How can I help you today?",
+});
+```
+
+**Parameters**
+
+<ParamField body="ctx" type="ActionCtx" required>
+  A Convex action context.
+</ParamField>
+
+<ParamField body="args" type="CreateAgentArgs" required>
+  Configuration for the new agent.
+
+  <Expandable title="CreateAgentArgs fields">
+    <ParamField body="name" type="string" required>
+      The display name of the agent.
+    </ParamField>
+
+    <ParamField body="description" type="string | null">
+      An optional description of the agent's purpose.
+    </ParamField>
+
+    <ParamField body="voiceMode" type='"webhook" | "hosted"'>
+      How the agent handles voice calls.
+    </ParamField>
+
+    <ParamField body="enableMessaging" type="boolean | null">
+      Whether the agent can send and receive messages.
+    </ParamField>
+
+    <ParamField body="modelTier" type='"turbo" | "balanced" | "max"'>
+      The AI model tier. `"turbo"` is fastest and cheapest; `"max"` is most capable.
+    </ParamField>
+
+    <ParamField body="systemPrompt" type="string | null">
+      The system prompt that shapes the agent's behavior and persona.
+    </ParamField>
+
+    <ParamField body="beginMessage" type="string | null">
+      The first message the agent sends or says when a session starts.
+    </ParamField>
+
+    <ParamField body="voice" type="string | null">
+      The voice ID for text-to-speech output. See `listVoices` for available options.
+    </ParamField>
+
+    <ParamField body="transferNumber" type="string | null">
+      A phone number to transfer calls to when requested.
+    </ParamField>
+
+    <ParamField body="customTools" type="JsonValue[] | null">
+      Custom tool definitions available to the agent during a session.
+    </ParamField>
+
+    <ParamField body="voicemailMessage" type="string | null">
+      Message left when the agent reaches a voicemail.
+    </ParamField>
+
+    <ParamField body="callScreeningIdentity" type="string | null">
+      Identity string used when screening inbound calls.
+    </ParamField>
+
+    <ParamField body="callScreeningPurpose" type="string | null">
+      Purpose statement used when screening inbound calls.
+    </ParamField>
+
+    <ParamField body="sttMode" type='"fast" | "accurate"'>
+      Speech-to-text mode. `"accurate"` has higher latency but better transcription quality.
+    </ParamField>
+
+    <ParamField body="ambientSound" type='"none" | "office" | "coffee-shop" | "outdoor"'>
+      Background ambient sound played during voice calls.
+    </ParamField>
+
+    <ParamField body="denoisingMode" type='"noise-cancellation" | "noise-and-background-speech-cancellation"'>
+      Noise reduction mode applied to the caller's audio.
+    </ParamField>
+
+    <ParamField body="maxSilenceMs" type="number | null">
+      Maximum milliseconds of silence before the agent considers the user done speaking.
+    </ParamField>
+
+    <ParamField body="voiceSpeed" type="number | null">
+      Playback speed multiplier for the agent's voice (e.g. `1.0` for normal speed).
+    </ParamField>
+
+    <ParamField body="interruptionSensitivity" type="number | null">
+      How sensitive the agent is to being interrupted. Higher values interrupt more easily.
+    </ParamField>
+
+    <ParamField body="enableBackchannel" type="boolean | null">
+      Whether the agent produces conversational backchannels (e.g. "mm-hmm", "I see").
+    </ParamField>
+
+    <ParamField body="language" type="string">
+      BCP 47 language tag for the agent's primary language (e.g. `"en-US"`).
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+**Returns** `Agent`
+
+---
+
+## `updateAgent`
+
+Updates an existing agent. Only the fields you provide are changed; all other fields remain as-is.
+
+```ts
+const updated = await agentphone.updateAgent(ctx, {
+  agentId: "agt_abc123",
+  systemPrompt: "You are a concise, friendly assistant.",
+  modelTier: "max",
+});
+```
+
+**Parameters**
+
+<ParamField body="ctx" type="ActionCtx" required>
+  A Convex action context.
+</ParamField>
+
+<ParamField body="agentId" type="string" required>
+  The AgentPhone agent ID to update.
+</ParamField>
+
+<ParamField body="...fields" type="UpdateAgentArgs">
+  Any subset of `CreateAgentArgs` fields to update. `UpdateAgentArgs` is `Partial<CreateAgentArgs>`.
+</ParamField>
+
+**Returns** `Agent`
+
+---
+
+## `deleteAgent`
+
+Permanently deletes an agent. This action cannot be undone.
+
+```ts
+await agentphone.deleteAgent(ctx, { agentId: "agt_abc123" });
+```
+
+**Parameters**
+
+<ParamField body="ctx" type="ActionCtx" required>
+  A Convex action context.
+</ParamField>
+
+<ParamField body="agentId" type="string" required>
+  The AgentPhone agent ID to delete.
+</ParamField>
+
+---
+
+## `listVoices`
+
+Returns all available text-to-speech voices you can assign to agents.
+
+```ts
+const voices = await agentphone.listVoices(ctx);
+```
+
+**Parameters**
+
+<ParamField body="ctx" type="ActionCtx" required>
+  A Convex action context.
+</ParamField>
+
+**Returns** The provider's voice list response.
+
+---
+
+## `listAgentConversations`
+
+Returns a paginated list of conversations belonging to a specific agent.
+
+```ts
+const conversations = await agentphone.listAgentConversations(ctx, {
+  agentId: "agt_abc123",
+  limit: 25,
+  offset: 0,
+});
+```
+
+**Parameters**
+
+<ParamField body="ctx" type="ActionCtx" required>
+  A Convex action context.
+</ParamField>
+
+<ParamField body="agentId" type="string" required>
+  The AgentPhone agent ID.
+</ParamField>
+
+<ParamField body="limit" type="number">
+  Maximum number of conversations to return per page.
+</ParamField>
+
+<ParamField body="offset" type="number">
+  Number of conversations to skip for pagination.
+</ParamField>
+
+**Returns** The provider's conversation list response.
+
+---
+
+## `listAgentCalls`
+
+Returns a paginated list of calls belonging to a specific agent.
+
+```ts
+const calls = await agentphone.listAgentCalls(ctx, {
+  agentId: "agt_abc123",
+  limit: 25,
+  offset: 0,
+});
+```
+
+**Parameters**
+
+<ParamField body="ctx" type="ActionCtx" required>
+  A Convex action context.
+</ParamField>
+
+<ParamField body="agentId" type="string" required>
+  The AgentPhone agent ID.
+</ParamField>
+
+<ParamField body="limit" type="number">
+  Maximum number of calls to return per page.
+</ParamField>
+
+<ParamField body="offset" type="number">
+  Number of calls to skip for pagination.
+</ParamField>
+
+**Returns** The provider's call list response.

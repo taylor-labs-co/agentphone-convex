@@ -1,0 +1,305 @@
+---
+title: "Calls API — Outbound, Web Calls, and Management"
+sidebarTitle: "Calls"
+description: "Place outbound calls, create web call sessions, end calls, retrieve transcripts and recordings, and list call history with the AgentPhone Calls API."
+---
+
+The Calls API provides methods to create and manage voice calls through AgentPhone. Outbound calls are placed to a phone number using a configured agent; web calls generate an access token for browser-based voice sessions. All call methods are members of the `AgentPhone` client class and require an `ActionCtx`, with the exception of listing and querying calls against the local resource mirror.
+
+---
+
+## `createOutboundCall(ctx, args)`
+
+Places an outbound phone call through AgentPhone using the specified agent. An `agentId` is required — either passed explicitly in `args` or pre-configured as `defaultAgentId` on the client. The method throws synchronously if neither is present.
+
+```typescript
+import { internalAction } from "./_generated/server.js";
+import { v } from "convex/values";
+import { agentphone } from "./agentphone.js";
+
+export const callCustomer = internalAction({
+  args: { toNumber: v.string() },
+  returns: v.any(),
+  handler: async (ctx, { toNumber }) =>
+    await agentphone.createOutboundCall(ctx, {
+      toNumber,
+      initialGreeting: "Hi! Is now still a good time?",
+    }),
+});
+```
+
+### Parameters
+
+<ParamField body="toNumber" type="string" required>
+  The E.164-formatted phone number to call (e.g. `+15005550006`).
+</ParamField>
+
+<ParamField body="agentId" type="string">
+  The AgentPhone agent ID to use for this call. Overrides `defaultAgentId` on the client. Required if no `defaultAgentId` is set.
+</ParamField>
+
+<ParamField body="fromNumberId" type="string">
+  The AgentPhone phone number ID to call from. When omitted, AgentPhone selects a number attached to the agent.
+</ParamField>
+
+<ParamField body="initialGreeting" type="string">
+  A greeting the agent speaks immediately when the call connects, before waiting for the caller to speak.
+</ParamField>
+
+<ParamField body="voice" type="string">
+  Override the agent's default voice for this call. Accepts any voice ID returned by `listVoices`.
+</ParamField>
+
+<ParamField body="systemPrompt" type="string">
+  Override the agent's system prompt for this call only. Useful for injecting per-call context such as a customer name or appointment details.
+</ParamField>
+
+<ParamField body="modelTier" type='"turbo" | "balanced" | "max"'>
+  The LLM model tier to use for this call. `"turbo"` prioritizes low latency, `"max"` prioritizes quality, and `"balanced"` sits between the two.
+</ParamField>
+
+<ParamField body="variables" type="Record<string, string>">
+  A flat key-value map of template variables to interpolate into the agent's system prompt or greeting for this call.
+</ParamField>
+
+<ParamField body="callScreeningIdentity" type="string">
+  The caller identity to present during automated call screening (e.g. `"Acme Support"`).
+</ParamField>
+
+<ParamField body="callScreeningPurpose" type="string">
+  A short description of the call's purpose to present during automated call screening (e.g. `"appointment confirmation"`).
+</ParamField>
+
+<ParamField body="testMode" type="boolean">
+  When `true`, skips the live provider call and returns a `TestModeResult`. Overrides the `testMode` flag on the client instance.
+</ParamField>
+
+### Return value
+
+Returns `CallSummary` on success, or `TestModeResult` when `testMode` is `true`.
+
+<Expandable title="CallSummary fields">
+  <ResponseField name="id" type="string">
+    The AgentPhone call ID.
+  </ResponseField>
+  <ResponseField name="agentId" type="string | null">
+    The ID of the agent that handled or initiated the call.
+  </ResponseField>
+  <ResponseField name="phoneNumberId" type="string | null">
+    The AgentPhone phone number ID used for this call.
+  </ResponseField>
+  <ResponseField name="phoneNumber" type="string | null">
+    The phone number string associated with this call's number ID.
+  </ResponseField>
+  <ResponseField name="fromNumber" type="string">
+    The E.164 number the call was placed from.
+  </ResponseField>
+  <ResponseField name="toNumber" type="string">
+    The E.164 number that was called.
+  </ResponseField>
+  <ResponseField name="direction" type='"inbound" | "outbound" | "web" | string'>
+    The call direction as reported by the provider.
+  </ResponseField>
+  <ResponseField name="status" type="string">
+    The call status at the time of the response (e.g. `"ringing"`, `"in-progress"`, `"completed"`).
+  </ResponseField>
+  <ResponseField name="startedAt" type="string">
+    ISO 8601 timestamp of when the call started.
+  </ResponseField>
+  <ResponseField name="endedAt" type="string | null">
+    ISO 8601 timestamp of when the call ended, or `null` if still in progress.
+  </ResponseField>
+  <ResponseField name="durationSeconds" type="number | null">
+    Call duration in seconds, or `null` if the call has not yet ended.
+  </ResponseField>
+  <ResponseField name="lastTranscriptSnippet" type="string | null">
+    A short snippet from the end of the call transcript, if available.
+  </ResponseField>
+  <ResponseField name="recordingUrl" type="string | null">
+    A direct URL to the call recording, if available.
+  </ResponseField>
+  <ResponseField name="recordingAvailable" type="boolean">
+    Whether a recording is available for this call.
+  </ResponseField>
+</Expandable>
+
+---
+
+## `createWebCall(ctx, args)`
+
+Creates a browser-based web call session. Returns a `callId` and a short-lived `accessToken` that a browser client uses to join the call via a WebRTC SDK. An `agentId` is required — either explicit in `args` or via `defaultAgentId`.
+
+```typescript
+import { internalAction } from "./_generated/server.js";
+import { v } from "convex/values";
+import { agentphone } from "./agentphone.js";
+
+export const startWebCall = internalAction({
+  args: {},
+  returns: v.any(),
+  handler: async (ctx) =>
+    await agentphone.createWebCall(ctx, {
+      variables: { userName: "Taylor" },
+    }),
+});
+```
+
+### Parameters
+
+<ParamField body="agentId" type="string">
+  The AgentPhone agent ID to use. Overrides `defaultAgentId`. Required if no `defaultAgentId` is configured.
+</ParamField>
+
+<ParamField body="metadata" type="JsonValue">
+  Arbitrary JSON metadata to associate with the call session. Passed through to the provider and surfaced in call events and summaries.
+</ParamField>
+
+<ParamField body="variables" type="Record<string, string>">
+  A flat key-value map of template variables to interpolate into the agent's configuration for this session.
+</ParamField>
+
+<ParamField body="testMode" type="boolean">
+  When `true`, skips the live provider call and returns a `TestModeResult`.
+</ParamField>
+
+### Return value
+
+Returns `WebCallResult` on success, or `TestModeResult` when `testMode` is `true`.
+
+<Expandable title="WebCallResult fields">
+  <ResponseField name="callId" type="string">
+    The AgentPhone call ID for this web session.
+  </ResponseField>
+  <ResponseField name="accessToken" type="string">
+    A short-lived token the browser client passes to the AgentPhone WebRTC SDK to authenticate and join the call.
+  </ResponseField>
+</Expandable>
+
+---
+
+## `endCall(ctx, { callId })`
+
+Terminates an active call. Returns a `CallSummary` reflecting the call's final state. Also updates the local resource mirror and appends a `call.ended` API event.
+
+```typescript
+await agentphone.endCall(ctx, { callId: "call_abc123" });
+```
+
+<ParamField body="callId" type="string" required>
+  The AgentPhone call ID to terminate.
+</ParamField>
+
+---
+
+## `getCall(ctx, { callId })`
+
+Fetches a single call by ID directly from the AgentPhone provider. Returns a `CallSummary`.
+
+```typescript
+const call = await agentphone.getCall(ctx, { callId: "call_abc123" });
+```
+
+<ParamField body="callId" type="string" required>
+  The AgentPhone call ID to retrieve.
+</ParamField>
+
+---
+
+## `listCalls(ctx, args)`
+
+Lists calls from the AgentPhone provider, with optional filtering. Returns `{ data?: CallSummary[]; calls?: CallSummary[] }` — check both fields for compatibility across provider versions.
+
+```typescript
+const result = await agentphone.listCalls(ctx, {
+  direction: "outbound",
+  status: "completed",
+  limit: 25,
+});
+```
+
+### Parameters
+
+<ParamField body="limit" type="number">
+  Maximum number of calls to return.
+</ParamField>
+
+<ParamField body="offset" type="number">
+  Zero-based offset for pagination.
+</ParamField>
+
+<ParamField body="status" type="string">
+  Filter by call status (e.g. `"completed"`, `"failed"`).
+</ParamField>
+
+<ParamField body="direction" type='"inbound" | "outbound" | "web"'>
+  Filter by call direction.
+</ParamField>
+
+<ParamField body="search" type="string">
+  A search string to filter calls by phone number or other provider-supported fields.
+</ParamField>
+
+---
+
+## `listCallsForNumber(ctx, args)`
+
+Lists calls associated with a specific phone number ID from the provider.
+
+```typescript
+const result = await agentphone.listCallsForNumber(ctx, {
+  numberId: "num_xyz456",
+  limit: 50,
+});
+```
+
+<ParamField body="numberId" type="string" required>
+  The AgentPhone phone number ID to list calls for.
+</ParamField>
+
+<ParamField body="limit" type="number">
+  Maximum number of calls to return.
+</ParamField>
+
+<ParamField body="offset" type="number">
+  Zero-based offset for pagination.
+</ParamField>
+
+---
+
+## `getCallTranscript(ctx, { callId })`
+
+Fetches the latest transcript for a call live from the provider. Also persists the result to the local mirror so it is available via `getLocalCallTranscript` without a network round-trip.
+
+```typescript
+const transcript = await agentphone.getCallTranscript(ctx, {
+  callId: "call_abc123",
+});
+```
+
+<ParamField body="callId" type="string" required>
+  The AgentPhone call ID whose transcript you want to retrieve.
+</ParamField>
+
+<Note>
+  For streaming transcripts or large recording binaries, use an app-owned HTTP action rather than passing binary or streaming data through Convex values. Convex action return values must be serializable JSON, so streaming responses should be proxied directly from your HTTP action to the client.
+</Note>
+
+---
+
+## `getCallRecording(ctx, { callId })`
+
+Fetches recording metadata or a recording URL for a call from the provider. Also persists the result to the local mirror.
+
+```typescript
+const recording = await agentphone.getCallRecording(ctx, {
+  callId: "call_abc123",
+});
+```
+
+<ParamField body="callId" type="string" required>
+  The AgentPhone call ID whose recording you want to retrieve.
+</ParamField>
+
+<Warning>
+  Do not attempt to pass raw recording audio through a Convex action return value. If you need to serve the audio binary to a browser, proxy the provider's recording URL through an app-owned HTTP action instead.
+</Warning>

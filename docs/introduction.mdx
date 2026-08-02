@@ -1,0 +1,58 @@
+---
+title: "AgentPhone for Convex: Messaging and Voice Overview"
+sidebarTitle: "Introduction"
+description: "agentphone-convex is a Convex component for AgentPhone. Get a typed client, reactive resource mirrors, durable outbound queue, and signed webhook delivery."
+---
+
+`agentphone-convex` is a Convex component that integrates the [AgentPhone](https://agentphone.ai/) AI messaging and voice platform directly into your Convex backend. Rather than building and maintaining your own HTTP layer, webhook handler, and state-sync logic, you install one component and get a fully typed API client, Convex-native resource mirrors that update reactively, a durable outbound queue with idempotency and retries, signed and replay-protected webhook delivery, and an indexed event history—all in one package.
+
+## Who it's for
+
+If you are building on Convex and want to add AI-powered SMS, iMessage, WhatsApp, or voice calling to your application, `agentphone-convex` gives you a production-ready integration without leaving the Convex programming model. Your queries, mutations, and actions work with local Convex tables rather than calling AgentPhone on every read, so your UI stays reactive and your logic stays serverless.
+
+## Key capabilities
+
+<CardGroup cols={2}>
+  <Card title="Messaging" icon="message" href="/guides/send-messages">
+    Send SMS, iMessage, and WhatsApp messages directly from actions or queue them durably from mutations. Full support for media, buttons, list pickers, reactions, and send styles.
+  </Card>
+  <Card title="Voice Calls" icon="phone" href="/guides/voice-calls">
+    Initiate outbound phone calls and web calls with a greeting, custom voice, system prompt, and model tier. Retrieve transcripts and recordings from the local mirror.
+  </Card>
+  <Card title="Webhooks" icon="webhook" href="/guides/webhooks">
+    Receive signed, replay-protected, deduplicated webhook events from AgentPhone. Return synchronous voice responses or handle async message and reaction events with retryable internal mutations.
+  </Card>
+  <Card title="Outbound Queue" icon="list-check" href="/guides/outbound-queue">
+    Enqueue messages and calls from mutations with idempotency keys, configurable retry limits, and observable status. Test the queue end-to-end without an API key using test mode.
+  </Card>
+  <Card title="Reactive Mirrors" icon="database" href="/concepts/resource-mirrors">
+    Agents, numbers, conversations, messages, calls, and transcripts are stored in scoped Convex tables. Query them with standard Convex queries and subscribe to live updates in your UI.
+  </Card>
+  <Card title="Event History" icon="clock-rotate-left" href="/concepts/event-history">
+    Every incoming webhook and outgoing API call is appended to an immutable indexed event log. Filter by type, agent, number, conversation, call, or delivery ID for debugging and auditing.
+  </Card>
+</CardGroup>
+
+## Prerequisites
+
+Before you start, make sure you have:
+
+- A **Convex project** (Node.js >= 20, `convex` >= 1.0)
+- An **AgentPhone account** and a project API key from [agentphone.ai](https://agentphone.ai/)
+- At least one AgentPhone **agent** configured in your AgentPhone project
+
+<Note>
+  The `agentphone-convex` package is Convex backend code and cannot run in the browser. All `AgentPhone` client usage must be inside `convex/` functions.
+</Note>
+
+## Authorization boundary
+
+Component scopes isolate records from one another, but they do not authorize your application's users. Any public Convex function that returns AgentPhone data must authenticate the caller and verify their access to the configured scope. The package exports a `requireAgentPhoneScopeAccess` helper for JWT-based applications, but you can substitute any application-level membership check.
+
+<Warning>
+  Checking only that a user is signed in is not sufficient when multiple users or tenants share a deployment. Always verify that the caller has access to the specific scope being queried.
+</Warning>
+
+## Next steps
+
+Ready to add AgentPhone to your project? Follow the step-by-step [Quickstart](/quickstart) to install the component, configure your API key, register the webhook route, and send your first message in under ten minutes.

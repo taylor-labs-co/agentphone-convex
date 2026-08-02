@@ -1,0 +1,333 @@
+---
+title: "Event History Queries — Browse Incoming and Outgoing"
+sidebarTitle: "Event Queries"
+description: "Query the immutable AgentPhone event log stored in your Convex database by source, type, agent, number, conversation, call, or delivery ID."
+---
+
+Every webhook delivery and every outbound API call that the component makes is appended to an immutable, scoped event log. Incoming events have `source: "webhook"` and outgoing events have `source: "api"`. You can query this log from any Convex query, mutation, or action context. Results are ordered most-recent first and capped at 100 records per call.
+
+<Note>
+  The event log is append-only and separate from the latest-state resource mirrors. Reading events gives you history; reading [local resources](/api/local-resources) gives you current state.
+</Note>
+
+---
+
+## `StoredEvent` Type
+
+Every query on this page returns `StoredEvent` objects. The fields are:
+
+<ResponseField name="scope" type="string">
+  The component scope this event belongs to (e.g. `"default"`).
+</ResponseField>
+
+<ResponseField name="source" type='"webhook" | "api"'>
+  `"webhook"` for events received from AgentPhone; `"api"` for events your application generated via the client.
+</ResponseField>
+
+<ResponseField name="deliveryId" type="string | undefined">
+  The AgentPhone webhook delivery ID. Present on incoming events; absent on outgoing ones.
+</ResponseField>
+
+<ResponseField name="eventType" type="string">
+  The AgentPhone event name, for example `"agent.message"` or `"agent.call_ended"`.
+</ResponseField>
+
+<ResponseField name="channel" type="string | undefined">
+  The messaging or voice channel, such as `"sms"`, `"imessage"`, `"whatsapp"`, or `"voice"`.
+</ResponseField>
+
+<ResponseField name="timestamp" type="string">
+  ISO 8601 timestamp set by AgentPhone at the time the event occurred.
+</ResponseField>
+
+<ResponseField name="receivedAt" type="number">
+  Unix millisecond timestamp at which the component received or generated the event.
+</ResponseField>
+
+<ResponseField name="agentId" type="string | undefined">
+  AgentPhone agent ID if the event is associated with an agent.
+</ResponseField>
+
+<ResponseField name="numberId" type="string | undefined">
+  AgentPhone number ID if the event is associated with a phone number.
+</ResponseField>
+
+<ResponseField name="conversationId" type="string | undefined">
+  AgentPhone conversation ID if the event is associated with a conversation.
+</ResponseField>
+
+<ResponseField name="callId" type="string | undefined">
+  AgentPhone call ID if the event is associated with a call.
+</ResponseField>
+
+<ResponseField name="messageId" type="string | undefined">
+  AgentPhone message ID if the event is associated with a message.
+</ResponseField>
+
+<ResponseField name="direction" type="string | undefined">
+  Message or call direction (`"inbound"` or `"outbound"`), when present in the event payload.
+</ResponseField>
+
+<ResponseField name="payload" type="unknown">
+  The raw event payload as received from AgentPhone or constructed by the client.
+</ResponseField>
+
+---
+
+## All Events
+
+### `listEvents`
+
+Returns all events for the configured scope, most recent first.
+
+```ts
+const events = await agentphone.listEvents(ctx, { limit: 25 });
+```
+
+**Parameters**
+
+<ParamField body="ctx" type="QueryCtx | MutationCtx | ActionCtx" required>
+  A Convex query, mutation, or action context.
+</ParamField>
+
+<ParamField body="limit" type="number">
+  Maximum number of events to return. Defaults to `50`. Maximum is `100`.
+</ParamField>
+
+**Returns** `StoredEvent[]`
+
+---
+
+## By Source
+
+### `listIncoming`
+
+Returns only incoming (webhook) events, most recent first.
+
+```ts
+const incoming = await agentphone.listIncoming(ctx, { limit: 50 });
+```
+
+**Parameters**
+
+<ParamField body="ctx" type="QueryCtx | MutationCtx | ActionCtx" required>
+  A Convex query, mutation, or action context.
+</ParamField>
+
+<ParamField body="limit" type="number">
+  Maximum number of events to return. Defaults to `50`. Maximum is `100`.
+</ParamField>
+
+**Returns** `StoredEvent[]`
+
+---
+
+### `listOutgoing`
+
+Returns only outgoing (API) events, most recent first.
+
+```ts
+const outgoing = await agentphone.listOutgoing(ctx, { limit: 50 });
+```
+
+**Parameters**
+
+<ParamField body="ctx" type="QueryCtx | MutationCtx | ActionCtx" required>
+  A Convex query, mutation, or action context.
+</ParamField>
+
+<ParamField body="limit" type="number">
+  Maximum number of events to return. Defaults to `50`. Maximum is `100`.
+</ParamField>
+
+**Returns** `StoredEvent[]`
+
+---
+
+## By Type
+
+### `listEventsByType`
+
+Returns events matching a specific event type string, most recent first.
+
+```ts
+const messageEvents = await agentphone.listEventsByType(ctx, {
+  eventType: "agent.message",
+  limit: 50,
+});
+```
+
+**Parameters**
+
+<ParamField body="ctx" type="QueryCtx | MutationCtx | ActionCtx" required>
+  A Convex query, mutation, or action context.
+</ParamField>
+
+<ParamField body="eventType" type="string" required>
+  The event type string to filter on, such as `"agent.message"`, `"agent.reaction"`, or `"agent.call_ended"`.
+</ParamField>
+
+<ParamField body="limit" type="number">
+  Maximum number of events to return. Defaults to `50`. Maximum is `100`.
+</ParamField>
+
+**Returns** `StoredEvent[]`
+
+---
+
+## By Resource
+
+### `listEventsByAgent`
+
+Returns events associated with a specific agent, most recent first.
+
+```ts
+const agentEvents = await agentphone.listEventsByAgent(ctx, {
+  agentId: "agt_abc123",
+  limit: 20,
+});
+```
+
+**Parameters**
+
+<ParamField body="ctx" type="QueryCtx | MutationCtx | ActionCtx" required>
+  A Convex query, mutation, or action context.
+</ParamField>
+
+<ParamField body="agentId" type="string" required>
+  The AgentPhone agent ID to filter on.
+</ParamField>
+
+<ParamField body="limit" type="number">
+  Maximum number of events to return. Defaults to `50`. Maximum is `100`.
+</ParamField>
+
+**Returns** `StoredEvent[]`
+
+---
+
+### `listEventsByNumber`
+
+Returns events associated with a specific phone number, most recent first.
+
+```ts
+const numberEvents = await agentphone.listEventsByNumber(ctx, {
+  numberId: "num_xyz789",
+  limit: 20,
+});
+```
+
+**Parameters**
+
+<ParamField body="ctx" type="QueryCtx | MutationCtx | ActionCtx" required>
+  A Convex query, mutation, or action context.
+</ParamField>
+
+<ParamField body="numberId" type="string" required>
+  The AgentPhone number ID to filter on.
+</ParamField>
+
+<ParamField body="limit" type="number">
+  Maximum number of events to return. Defaults to `50`. Maximum is `100`.
+</ParamField>
+
+**Returns** `StoredEvent[]`
+
+---
+
+### `listEventsByConversation`
+
+Returns events associated with a specific conversation, most recent first.
+
+```ts
+const conversationEvents = await agentphone.listEventsByConversation(ctx, {
+  conversationId: "conv_abc123",
+  limit: 20,
+});
+```
+
+**Parameters**
+
+<ParamField body="ctx" type="QueryCtx | MutationCtx | ActionCtx" required>
+  A Convex query, mutation, or action context.
+</ParamField>
+
+<ParamField body="conversationId" type="string" required>
+  The AgentPhone conversation ID to filter on.
+</ParamField>
+
+<ParamField body="limit" type="number">
+  Maximum number of events to return. Defaults to `50`. Maximum is `100`.
+</ParamField>
+
+**Returns** `StoredEvent[]`
+
+---
+
+### `listEventsByCall`
+
+Returns events associated with a specific call, most recent first.
+
+```ts
+const callEvents = await agentphone.listEventsByCall(ctx, {
+  callId: "call_abc123",
+  limit: 20,
+});
+```
+
+**Parameters**
+
+<ParamField body="ctx" type="QueryCtx | MutationCtx | ActionCtx" required>
+  A Convex query, mutation, or action context.
+</ParamField>
+
+<ParamField body="callId" type="string" required>
+  The AgentPhone call ID to filter on.
+</ParamField>
+
+<ParamField body="limit" type="number">
+  Maximum number of events to return. Defaults to `50`. Maximum is `100`.
+</ParamField>
+
+**Returns** `StoredEvent[]`
+
+---
+
+## By Delivery ID
+
+### `getEventByDeliveryId`
+
+Looks up a single event by its AgentPhone webhook delivery ID. Useful for deduplication checks and debugging failed deliveries.
+
+```ts
+const event = await agentphone.getEventByDeliveryId(ctx, {
+  deliveryId: "whdelivery_abc123",
+});
+```
+
+**Parameters**
+
+<ParamField body="ctx" type="QueryCtx | MutationCtx | ActionCtx" required>
+  A Convex query, mutation, or action context.
+</ParamField>
+
+<ParamField body="deliveryId" type="string" required>
+  The AgentPhone webhook delivery ID (`X-Webhook-ID` header value).
+</ParamField>
+
+**Returns** `StoredEvent | null`
+
+---
+
+## Exported Validators
+
+Import these validators to annotate your own Convex function return types.
+
+```ts
+import { storedEventValidator, eventValidator } from "agentphone-convex";
+```
+
+| Export | Validates |
+|---|---|
+| `storedEventValidator` | A `StoredEvent` as stored in the `events` table |
+| `eventValidator` | An `AgentPhoneEvent` as received in a webhook callback |

@@ -1,0 +1,152 @@
+---
+title: "Durable Outbound Queue for Messages and Voice Calls"
+sidebarTitle: "Outbound Queue"
+description: "Queue messages and calls with built-in idempotency, automatic retries, observable status, and clean separation from user-facing mutations."
+---
+
+The durable outbound queue lets you schedule messages and calls from a Convex mutation — before any provider call happens — and rely on the component to execute, retry, and track each request through to a terminal state. This is the right choice whenever you need idempotency guarantees, automatic retries on transient failures, observable request status that your app can poll, or a clean boundary between user-facing transactions and slow provider I/O.
+
+## Why use the queue
+
+<CardGroup cols={2}>
+  <Card title="Idempotency" icon="fingerprint">
+    Supply an `idempotencyKey` and re-enqueue freely — duplicate keys within the same scope are ignored, so user retries and double-submits never create duplicate sends.
+  </Card>
+  <Card title="Automatic retries" icon="rotate">
+    Set `maxAttempts` up to 5. The queue retries only on failures that can succeed later: transport errors, `408`, `429`, and `5xx` responses.
+  </Card>
+  <Card title="Observable status" icon="chart-bar">
+    Every request moves through `queued → sending → sent | failed | cancelled`. Query status at any time from a mutation, action, or query.
+  </Card>
+  <Card title="Decoupled from user transactions" icon="arrows-split-up-and-left">
+    Enqueue from a mutation without blocking the user-facing response. The scheduled action runs independently after the mutation commits.
+  </Card>
+</CardGroup>
+
+## Enqueuing a message
+
+Call `enqueueMessage` from an `internalMutation`. The function returns a `requestId` you can store to check status later.
+
+```ts
+export const queueReminder = internalMutation({
+  args: { appointmentId: v.string(), toNumber: v.string() },
+  returns: v.any(),
+  handler: async (ctx, args) =>
+    await agentphone.enqueueMessage(ctx, {
+      toNumber: args.toNumber,
+      body: "Your appointment is tomorrow at 10:00 AM.",
+      idempotencyKey: `appointment:${args.appointmentId}:reminder`,
+      maxAttempts: 3,
+    }),
+});
+```
+
+## Enqueuing calls
+
+`enqueueOutboundCall` and `enqueueWebCall` follow the exact same pattern and accept the same `QueueOptions`.
+
+```ts
+export const queueOutboundCall = internalMutation({
+  args: { appointmentId: v.string(), toNumber: v.string() },
+  returns: v.any(),
+  handler: async (ctx, args) =>
+    await agentphone.enqueueOutboundCall(ctx, {
+      toNumber: args.toNumber,
+      initialGreeting: "Hi! Is now still a good time for your appointment?",
+      idempotencyKey: `appointment:${args.appointmentId}:call`,
+      maxAttempts: 2,
+    }),
+});
+
+export const queueWebCall = internalMutation({
+  args: { sessionId: v.string() },
+  returns: v.any(),
+  handler: async (ctx, args) =>
+    await agentphone.enqueueWebCall(ctx, {
+      idempotencyKey: `session:${args.sessionId}:web-call`,
+      maxAttempts: 1,
+    }),
+});
+```
+
+## QueueOptions reference
+
+All three enqueue methods accept the following options in addition to their send-specific arguments.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `idempotencyKey` | `string` | — | Deduplicates within the component scope. Safe to re-enqueue with the same key. |
+| `maxAttempts` | `number` | `1` | Total delivery attempts including the first. Accepted range: 1–5. |
+| `testMode` | `boolean` | `false` | Skip the provider call while exercising the full queue and state machine. |
+
+## Outbound request statuses
+
+A queued request moves through the following statuses in order.
+
+<Steps>
+  <Step title="queued">
+    The request has been written to the component table and a scheduled action has been registered. No provider call has been made yet.
+  </Step>
+  <Step title="sending">
+    The scheduled action is executing and the provider HTTP call is in flight.
+  </Step>
+  <Step title="sent">
+    The provider accepted the request. This is always a terminal state — even if the response body could not be read, the request is marked `sent` and carries the error detail.
+  </Step>
+  <Step title="failed">
+    All attempts were exhausted, or the request received a non-retryable error (4xx except 408/429, unauthorized, forbidden). This is a terminal state.
+  </Step>
+  <Step title="cancelled">
+    The request was cancelled before it reached `sending`. This is a terminal state.
+  </Step>
+</Steps>
+
+## Querying status
+
+Read the status of any request from a query, mutation, or action using the `requestId` returned by the enqueue call.
+
+```ts
+// Get the full record for a single request
+const status = await agentphone.getOutboundStatus(ctx, { requestId });
+
+// List all requests currently waiting to be sent
+const pending = await agentphone.listOutboundRequests(ctx, { status: "queued" });
+```
+
+`listOutboundRequests` also accepts an optional `agentId` filter and a `limit` (default 50, max 100).
+
+## Cancelling a queued request
+
+Cancel a request that has not yet entered `sending` state. Once the scheduled action begins executing, cancellation has no effect.
+
+```ts
+await agentphone.cancelOutboundRequest(ctx, { requestId });
+```
+
+## Retry behavior
+
+The queue distinguishes retryable failures from permanent ones to avoid resending messages that were already rejected.
+
+<Tabs>
+  <Tab title="Retried">
+    - Network or transport errors
+    - HTTP `408` (Request Timeout)
+    - HTTP `429` (Too Many Requests)
+    - HTTP `5xx` (Server Error)
+  </Tab>
+  <Tab title="Fail immediately (not retried)">
+    - HTTP `4xx` responses other than `408` and `429`
+    - `401` Unauthorized
+    - `403` Forbidden
+  </Tab>
+</Tabs>
+
+Every attempt — including retries — sends the same `Idempotency-Key` header to AgentPhone. If a network failure leaves the outcome of a request ambiguous, the retry is not treated as a new send at the provider level.
+
+<Note>
+  The queue stores request data only — it never persists your API key. Scheduled actions read `AGENTPHONE_API_KEY` from the Convex environment at execution time.
+</Note>
+
+<Note>
+  An accepted send always reaches a terminal state. If AgentPhone returns a success status whose response body cannot be read, or the result cannot be stored, the request is still marked `sent` and carries the error. No accepted request is resent or left stuck in `sending`.
+</Note>

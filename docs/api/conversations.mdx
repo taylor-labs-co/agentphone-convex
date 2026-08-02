@@ -1,0 +1,194 @@
+---
+title: "Conversations API — List, Get, Update, and Paginate"
+sidebarTitle: "Conversations"
+description: "List, retrieve, and update conversations, paginate messages, send typing indicators, and work with the Conversation type in your Convex backend."
+---
+
+The Conversations API provides methods to read and manage conversations on the AgentPhone platform. Conversations represent ongoing threads between your agent's phone number and one or more participants. All methods call the AgentPhone provider directly through `agentphone.request` and are available on the `AgentPhone` client class. They require an `ActionCtx` because they perform live HTTP requests.
+
+---
+
+## `listConversations(ctx, args)`
+
+Returns a paginated list of conversations from the AgentPhone provider. The response shape is `ConversationListResponse`, which may use either a `data` or `conversations` key — check both for compatibility across provider versions.
+
+```typescript
+import { internalAction } from "./_generated/server.js";
+import { v } from "convex/values";
+import { agentphone } from "./agentphone.js";
+
+export const fetchConversations = internalAction({
+  args: {},
+  returns: v.any(),
+  handler: async (ctx) =>
+    await agentphone.listConversations(ctx, { limit: 50 }),
+});
+```
+
+### Parameters
+
+<ParamField body="limit" type="number">
+  Maximum number of conversations to return per page. The provider default applies when omitted.
+</ParamField>
+
+<ParamField body="offset" type="number">
+  Zero-based offset for paginating through the full conversation list.
+</ParamField>
+
+---
+
+## `getConversation(ctx, { conversationId })`
+
+Fetches a single conversation by its AgentPhone conversation ID. Returns a `Conversation` object.
+
+```typescript
+const conversation = await agentphone.getConversation(ctx, {
+  conversationId: "conv_abc123",
+});
+```
+
+<ParamField body="conversationId" type="string" required>
+  The AgentPhone conversation ID to retrieve.
+</ParamField>
+
+### Return value
+
+Returns a `Conversation` object. See the [Conversation type reference](#conversation-type) below.
+
+---
+
+## `listConversationMessages(ctx, args)`
+
+Returns messages within a specific conversation, sorted by time. Supports cursor-based pagination using `before` and `after` message IDs.
+
+```typescript
+const messages = await agentphone.listConversationMessages(ctx, {
+  conversationId: "conv_abc123",
+  limit: 25,
+  before: "msg_xyz789",
+});
+```
+
+### Parameters
+
+<ParamField body="conversationId" type="string" required>
+  The AgentPhone conversation ID to retrieve messages from.
+</ParamField>
+
+<ParamField body="limit" type="number">
+  Maximum number of messages to return per page.
+</ParamField>
+
+<ParamField body="before" type="string">
+  Return only messages sent before this message ID. Use for backwards pagination — fetching older messages.
+</ParamField>
+
+<ParamField body="after" type="string">
+  Return only messages sent after this message ID. Use for forward pagination — fetching newer messages.
+</ParamField>
+
+---
+
+## `updateConversation(ctx, args)`
+
+Updates mutable fields on an existing conversation. Returns the updated `Conversation` object.
+
+```typescript
+const updated = await agentphone.updateConversation(ctx, {
+  conversationId: "conv_abc123",
+  groupName: "Project Leads",
+  metadata: { crm_contact_id: "cust_001" },
+});
+```
+
+### Parameters
+
+<ParamField body="conversationId" type="string" required>
+  The AgentPhone conversation ID to update.
+</ParamField>
+
+<ParamField body="metadata" type="JsonValue | null">
+  Arbitrary JSON to store on the conversation. Pass `null` to clear existing metadata. When omitted entirely, the existing metadata is left unchanged.
+</ParamField>
+
+<ParamField body="groupName" type="string | null">
+  A display name for a group conversation. Pass `null` to remove the group name.
+</ParamField>
+
+---
+
+## `sendTypingIndicator(ctx, { conversationId })`
+
+Sends a typing indicator to the participants of a conversation on channels that support it (primarily iMessage). This is a fire-and-forget signal — the provider response is returned but there is no guaranteed delivery confirmation.
+
+```typescript
+await agentphone.sendTypingIndicator(ctx, {
+  conversationId: "conv_abc123",
+});
+```
+
+<ParamField body="conversationId" type="string" required>
+  The AgentPhone conversation ID to send a typing indicator to.
+</ParamField>
+
+<Note>
+  Typing indicators are only visible on channels that natively support them. On SMS, the call succeeds silently without any visible effect to the recipient.
+</Note>
+
+---
+
+## Conversation type
+
+The `Conversation` type describes the shape of a conversation object returned by `getConversation`, `updateConversation`, and the `ConversationListResponse`.
+
+<ResponseField name="id" type="string">
+  The AgentPhone conversation ID.
+</ResponseField>
+
+<ResponseField name="agentId" type="string | null">
+  The ID of the agent associated with this conversation, or `null` if unassigned.
+</ResponseField>
+
+<ResponseField name="phoneNumberId" type="string">
+  The AgentPhone phone number ID through which this conversation is routed.
+</ResponseField>
+
+<ResponseField name="phoneNumber" type="string">
+  The E.164 phone number string corresponding to `phoneNumberId`.
+</ResponseField>
+
+<ResponseField name="participant" type="string">
+  The E.164 phone number or identifier of the remote participant in a one-on-one conversation.
+</ResponseField>
+
+<ResponseField name="isGroup" type="boolean">
+  `true` if this conversation is an iMessage group thread.
+</ResponseField>
+
+<ResponseField name="groupId" type="string | null">
+  The provider-assigned group identifier, present when `isGroup` is `true`.
+</ResponseField>
+
+<ResponseField name="groupName" type="string | null">
+  The display name of the group, if one has been set.
+</ResponseField>
+
+<ResponseField name="lastMessageAt" type="string">
+  ISO 8601 timestamp of the most recent message in the conversation.
+</ResponseField>
+
+<ResponseField name="messageCount" type="number">
+  Total number of messages in the conversation as tracked by AgentPhone.
+</ResponseField>
+
+<ResponseField name="metadata" type="JsonValue | null">
+  Arbitrary JSON metadata attached to the conversation via `updateConversation`, or `null` if none has been set.
+</ResponseField>
+
+<ResponseField name="createdAt" type="string">
+  ISO 8601 timestamp of when the conversation was first created.
+</ResponseField>
+
+<Tip>
+  For reactive access to conversation data without a provider round-trip, use `agentphone.listLocalConversations` or `agentphone.getLocalConversation` from a Convex query. These read from the component's local mirror, which is updated by incoming webhooks, direct sends, and explicit sync operations.
+</Tip>

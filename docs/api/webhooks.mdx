@@ -1,0 +1,319 @@
+---
+title: "Webhooks API — Register, Configure, and Secure Endpoints"
+sidebarTitle: "Webhooks"
+description: "Register AgentPhone webhooks in Convex, configure URL and context settings, manage per-agent overrides, store signing secrets, and query delivery stats."
+---
+
+Webhooks are how AgentPhone pushes real-time events — inbound messages, iMessage reactions, and ended voice calls — into your Convex backend. The `AgentPhone` client exposes methods to register the HTTP route, call the AgentPhone API to configure or remove webhooks, and store the rotating secret used to verify every incoming request.
+
+## `registerRoutes`
+
+```typescript
+agentPhone.registerRoutes(http: HttpRouter): void
+```
+
+Call `registerRoutes` once in your `convex/http.ts` file. It mounts a signed `POST` handler at `{httpPrefix}/webhook` (default: `/agentphone/webhook`) on your Convex HTTP router. Every incoming request is authenticated with HMAC-SHA256 before any callback is invoked.
+
+```typescript
+// convex/http.ts
+import { httpRouter } from "convex/server";
+import { agentPhone } from "./agentphone";
+
+const http = httpRouter();
+agentPhone.registerRoutes(http);
+export default http;
+```
+
+<Note>
+  The route path is determined by the `httpPrefix` option you pass to the `AgentPhone` constructor. If you set `httpPrefix: "/ap"`, the webhook lands at `/ap/webhook`.
+</Note>
+
+The handler reads three required headers from every request:
+
+<ResponseField name="X-Webhook-Signature" type="string" required>
+  HMAC-SHA256 digest of `{timestamp}.{rawBody}`, prefixed with `sha256=`.
+</ResponseField>
+
+<ResponseField name="X-Webhook-Timestamp" type="string" required>
+  Unix timestamp (seconds) when AgentPhone dispatched the request. Requests older than `webhookToleranceSeconds` (default: 300) are rejected with HTTP 401.
+</ResponseField>
+
+<ResponseField name="X-Webhook-ID" type="string" required>
+  Unique delivery identifier used for deduplication. Duplicate delivery IDs return HTTP 200 without re-invoking your callback.
+</ResponseField>
+
+---
+
+## `configureWebhook`
+
+```typescript
+agentPhone.configureWebhook(
+  ctx: ActionCtx,
+  args?: ConfigureWebhookArgs
+): Promise<WebhookConfiguration>
+```
+
+Calls the AgentPhone API to create or update your project-level webhook and persists the rotating secret to Convex so signature verification works immediately. Call this from a Convex action — for example, as part of an `onboarding` action or a scheduled task.
+
+<ParamField path="url" type="string">
+  Override the webhook URL. Defaults to `{CONVEX_SITE_URL}{httpPrefix}/webhook?scope={scope}`, which is auto-computed from your deployment.
+</ParamField>
+
+<ParamField path="contextLimit" type="number">
+  Number of recent messages to include in the `recentHistory` field of each webhook event. Must be an integer between 0 and 50.
+</ParamField>
+
+<ParamField path="timeout" type="number">
+  Response timeout in seconds for voice callbacks. Must be an integer between 5 and 120.
+</ParamField>
+
+<ParamField path="subAccountId" type="string">
+  Target a specific AgentPhone sub-account. Falls back to `subAccountId` set on the `AgentPhone` instance.
+</ParamField>
+
+**Returns** `WebhookConfiguration`:
+
+<ResponseField name="id" type="string">
+  The AgentPhone-assigned webhook ID.
+</ResponseField>
+
+<ResponseField name="url" type="string">
+  The registered webhook URL.
+</ResponseField>
+
+<ResponseField name="secret" type="string">
+  The HMAC secret used to sign payloads. This is stored automatically in Convex.
+</ResponseField>
+
+<ResponseField name="status" type="string">
+  Current webhook status as reported by AgentPhone (e.g. `"active"`).
+</ResponseField>
+
+<ResponseField name="contextLimit" type="number">
+  The configured recent-message context window.
+</ResponseField>
+
+<ResponseField name="timeout" type="number">
+  The configured response timeout in seconds.
+</ResponseField>
+
+<ResponseField name="createdAt" type="string">
+  ISO 8601 timestamp from AgentPhone.
+</ResponseField>
+
+```typescript
+// convex/actions/setup.ts
+import { action } from "./_generated/server";
+import { agentPhone } from "../agentphone";
+
+export const setupWebhook = action({
+  args: {},
+  handler: async (ctx) => {
+    const config = await agentPhone.configureWebhook(ctx, {
+      contextLimit: 10,
+      timeout: 30,
+    });
+    console.log("Webhook active at", config.url);
+  },
+});
+```
+
+---
+
+## `configureAgentWebhook`
+
+```typescript
+agentPhone.configureAgentWebhook(
+  ctx: ActionCtx,
+  args: ConfigureWebhookArgs & { agentId: string }
+): Promise<WebhookConfiguration>
+```
+
+Identical to `configureWebhook` but configures a per-agent webhook override at `agents/{agentId}/webhook`. The agent webhook uses an isolated scope and its own secret, letting you route a specific agent's events to a different handler or apply different context settings.
+
+<ParamField path="agentId" type="string" required>
+  The AgentPhone agent ID to configure the webhook for.
+</ParamField>
+
+<ParamField path="url" type="string">
+  Override the webhook URL for this agent. Defaults to the auto-generated URL with the agent scope.
+</ParamField>
+
+<ParamField path="contextLimit" type="number">
+  Number of recent messages to include per event. Integer between 0 and 50.
+</ParamField>
+
+<ParamField path="timeout" type="number">
+  Voice callback timeout in seconds. Integer between 5 and 120.
+</ParamField>
+
+<ParamField path="subAccountId" type="string">
+  Target a specific sub-account.
+</ParamField>
+
+Returns the same `WebhookConfiguration` shape as `configureWebhook`.
+
+---
+
+## `setWebhookSecret`
+
+```typescript
+agentPhone.setWebhookSecret(
+  ctx: MutationCtx | ActionCtx,
+  args: { secret: string; scope?: string; agentId?: string }
+): Promise<null>
+```
+
+Stores a webhook secret that you configured manually in the AgentPhone dashboard rather than through `configureWebhook`. Use this when you want to manage the webhook URL yourself and only need Convex to verify incoming signatures.
+
+<ParamField path="secret" type="string" required>
+  The HMAC secret from your AgentPhone dashboard.
+</ParamField>
+
+<ParamField path="scope" type="string">
+  Override the scope key under which to store the secret. Defaults to the client's `scope` (or the agent-derived scope when `agentId` is provided).
+</ParamField>
+
+<ParamField path="agentId" type="string">
+  When set, stores the secret under the agent-specific scope for that agent's webhook.
+</ParamField>
+
+<Warning>
+  You must call `setWebhookSecret` (or `configureWebhook`) before `registerRoutes` can successfully verify incoming requests. Requests without a stored secret are rejected with HTTP 500.
+</Warning>
+
+```typescript
+// Store the secret copied from the AgentPhone dashboard
+await agentPhone.setWebhookSecret(ctx, { secret: "whsec_abc123..." });
+```
+
+---
+
+## `removeWebhook`
+
+```typescript
+agentPhone.removeWebhook(
+  ctx: ActionCtx,
+  args?: { agentId?: string }
+): Promise<null>
+```
+
+Calls the AgentPhone API to delete the project-level webhook (or the agent-level webhook when `agentId` is provided) and removes the stored secret from Convex.
+
+<ParamField path="agentId" type="string">
+  When provided, removes the agent-specific webhook instead of the project webhook.
+</ParamField>
+
+---
+
+## Convenience Methods
+
+These methods wrap common read and management operations without requiring you to construct API paths manually.
+
+### Project webhook
+
+```typescript
+agentPhone.getProjectWebhook(ctx: ActionCtx): Promise<unknown>
+agentPhone.deleteProjectWebhook(ctx: ActionCtx): Promise<null>
+agentPhone.testProjectWebhook(ctx: ActionCtx): Promise<unknown>
+```
+
+- **`getProjectWebhook`** — Fetches the current project webhook configuration from AgentPhone.
+- **`deleteProjectWebhook`** — Alias for `removeWebhook()` with no `agentId`.
+- **`testProjectWebhook`** — Triggers a test delivery from AgentPhone to your registered webhook URL.
+
+### Agent webhook
+
+```typescript
+agentPhone.getAgentWebhook(ctx: ActionCtx, args: { agentId: string }): Promise<unknown>
+agentPhone.deleteAgentWebhook(ctx: ActionCtx, args: { agentId: string }): Promise<null>
+agentPhone.testAgentWebhook(ctx: ActionCtx, args: { agentId: string }): Promise<unknown>
+```
+
+- **`getAgentWebhook`** — Fetches the webhook configuration for a specific agent.
+- **`deleteAgentWebhook`** — Alias for `removeWebhook({ agentId })`.
+- **`testAgentWebhook`** — Triggers a test delivery for the specified agent's webhook.
+
+### Delivery stats
+
+```typescript
+agentPhone.listAgentWebhookDeliveries(
+  ctx: ActionCtx,
+  args: { agentId: string; limit?: number; offset?: number }
+): Promise<unknown>
+
+agentPhone.listProviderWebhookDeliveries(
+  ctx: ActionCtx,
+  args?: { limit?: number; offset?: number }
+): Promise<unknown>
+
+agentPhone.getWebhookDeliveryStats(
+  ctx: ActionCtx,
+  args?: { hours?: number }
+): Promise<unknown>
+
+agentPhone.getWebhookAllTimeStats(ctx: ActionCtx): Promise<unknown>
+```
+
+- **`listAgentWebhookDeliveries`** — Lists delivery records from AgentPhone for a specific agent's webhook.
+- **`listProviderWebhookDeliveries`** — Lists project-level delivery records from AgentPhone.
+- **`getWebhookDeliveryStats`** — Returns delivery counts and failure rates for the last `hours` hours (default: provider default).
+- **`getWebhookAllTimeStats`** — Returns aggregate delivery statistics across all time.
+
+<Tip>
+  To query delivery records stored locally in Convex (rather than fetched from the AgentPhone API), use `listWebhookDeliveries` and `listFailedWebhookDeliveries` from the [Webhook Deliveries API](/api/webhook-deliveries).
+</Tip>
+
+---
+
+## Incoming Event Types
+
+AgentPhone delivers three event types to your webhook endpoint. Set the corresponding callback on your `AgentPhone` instance to handle each one.
+
+<ResponseField name="agent.message" type="AgentMessageEvent">
+  Fires when an inbound or outbound message is processed. The `data` field contains a `MessageEventData` object with `from`, `to`, `direction`, `message`, `mediaUrl`, and optional `group` details.
+</ResponseField>
+
+<ResponseField name="agent.reaction" type="AgentReactionEvent">
+  Fires when a contact reacts to a message via iMessage. The `channel` is always `"imessage"`. The `data` field contains `reactionType`, `fromNumber`, `messageId`, and `messageBody`.
+</ResponseField>
+
+<ResponseField name="agent.call_ended" type="AgentCallEndedEvent">
+  Fires when a voice call ends. The `channel` is always `"voice"`. The `data` field contains `callId`, `durationSeconds`, `transcript`, `summary`, and `userSentiment`.
+
+  <Note>
+    Voice callbacks are **synchronous** — your mutation runs inside the same Convex transaction as the delivery record. Throwing from a voice callback rolls back the transaction and causes AgentPhone to retry the delivery.
+  </Note>
+</ResponseField>
+
+### `AgentPhoneEvent` structure
+
+Every event shares this top-level shape:
+
+<ResponseField name="event" type="string">
+  One of `"agent.message"`, `"agent.reaction"`, or `"agent.call_ended"`.
+</ResponseField>
+
+<ResponseField name="channel" type="string">
+  The channel the event originated on: `"sms"`, `"mms"`, `"imessage"`, `"voice"`, or `"whatsapp"`.
+</ResponseField>
+
+<ResponseField name="timestamp" type="string">
+  ISO 8601 timestamp set by AgentPhone when the event was created.
+</ResponseField>
+
+<ResponseField name="agentId" type="string | null">
+  The AgentPhone agent ID associated with this event, if any.
+</ResponseField>
+
+<ResponseField name="data" type="object">
+  Event-specific payload. Shape varies by `event` type — see above.
+</ResponseField>
+
+<ResponseField name="conversationState" type="unknown">
+  Optional snapshot of the conversation state at the time of the event.
+</ResponseField>
+
+<ResponseField name="recentHistory" type="RecentHistoryItem[]">
+  Up to `contextLimit` recent messages for this conversation. Each item includes `content`, `direction`, `channel`, `at`, and optionally `senderIdentifier`.
+</ResponseField>

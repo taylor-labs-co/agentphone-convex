@@ -1,0 +1,163 @@
+---
+title: "Place and Manage Voice Calls with AgentPhone Convex"
+sidebarTitle: "Voice Calls"
+description: "Place outbound calls, start browser-based web calls, end active calls, list call history, and retrieve transcripts using the AgentPhone Convex component."
+---
+
+The `agentphone-convex` component exposes a full set of voice primitives: outbound calls to phone numbers, web calls that run in the browser, real-time call management, and transcript retrieval. All provider calls belong inside Convex actions, and successful operations are mirrored into your local Convex state for reactive querying.
+
+## Placing an outbound call
+
+`createOutboundCall` dials a phone number from your AgentPhone agent. It must run inside a Convex action:
+
+```ts
+import { v } from "convex/values";
+import { internalAction } from "./_generated/server.js";
+import { agentphone } from "./agentphone.js";
+
+export const callCustomer = internalAction({
+  args: { toNumber: v.string() },
+  returns: v.any(),
+  handler: async (ctx, { toNumber }) =>
+    await agentphone.createOutboundCall(ctx, {
+      toNumber,
+      initialGreeting: "Hi! Is now still a good time?",
+    }),
+});
+```
+
+## `CreateOutboundCallArgs` reference
+
+| Field | Type | Description |
+|---|---|---|
+| `toNumber` | `string` | **Required.** Recipient phone number in E.164 format. |
+| `agentId` | `string` | Agent to use. Falls back to `defaultAgentId` set on the client. |
+| `fromNumberId` | `string` | ID of the originating phone number. |
+| `initialGreeting` | `string` | First spoken message the agent delivers when the call connects. |
+| `voice` | `string` | Override the agent's default voice for this call. |
+| `systemPrompt` | `string` | Per-call system prompt that replaces the agent's default. |
+| `modelTier` | `"turbo" \| "balanced" \| "max"` | LLM tier to use for this call. |
+| `variables` | `Record<string, string>` | Template variable substitutions for the system prompt. |
+| `callScreeningIdentity` | `string` | Caller identity to announce during call screening. |
+| `callScreeningPurpose` | `string` | Purpose statement to announce during call screening. |
+
+<Tip>
+`agentId` is required either as an argument or via `defaultAgentId` on the client. If neither is set, `createOutboundCall` throws before making any network request.
+</Tip>
+
+## Starting a web call
+
+`createWebCall` provisions a browser-based call and returns the tokens your front end needs to connect. It is useful for click-to-call widgets and in-app voice features.
+
+```ts
+export const startWebCall = internalAction({
+  args: {},
+  returns: v.any(),
+  handler: async (ctx) =>
+    await agentphone.createWebCall(ctx, {
+      variables: { customerName: "Alex" },
+    }),
+});
+```
+
+The response is a `WebCallResult`:
+
+| Field | Type | Description |
+|---|---|---|
+| `callId` | `string` | Provider call ID. Pass this to `endCall` or `getCallTranscript`. |
+| `accessToken` | `string` | Short-lived token for the browser WebRTC client. |
+
+## Ending an active call
+
+Call `endCall` with the provider call ID to hang up:
+
+```ts
+await agentphone.endCall(ctx, { callId: "call_123" });
+```
+
+## Listing calls
+
+Use `listCalls` to query calls across your project, or `listCallsForNumber` to scope results to a specific phone number:
+
+```ts
+// All outbound calls, most recent 25
+const result = await agentphone.listCalls(ctx, {
+  limit: 25,
+  direction: "outbound",
+});
+
+// Calls for a specific number
+const numberCalls = await agentphone.listCallsForNumber(ctx, {
+  numberId: "num_abc123",
+  limit: 50,
+});
+```
+
+`listCalls` accepts:
+
+| Field | Type | Description |
+|---|---|---|
+| `limit` | `number` | Maximum records to return. |
+| `offset` | `number` | Pagination offset. |
+| `status` | `string` | Filter by call status. |
+| `direction` | `"inbound" \| "outbound" \| "web"` | Filter by call direction. |
+| `search` | `string` | Free-text search across call metadata. |
+
+## Retrieving call transcripts
+
+You have two options depending on whether you want a fresh fetch from AgentPhone or a read from the local mirror:
+
+<Tabs>
+  <Tab title="Live fetch">
+    `getCallTranscript` fetches the latest transcript directly from AgentPhone and caches it in the local mirror:
+
+    ```ts
+    const transcript = await agentphone.getCallTranscript(ctx, {
+      callId: "call_123",
+    });
+    ```
+
+    Use this when you need the most up-to-date data, such as immediately after a call ends.
+  </Tab>
+  <Tab title="Local mirror">
+    `getLocalCallTranscript` reads the cached transcript from Convex without making a provider request. It can be called from a query:
+
+    ```ts
+    const transcript = await agentphone.getLocalCallTranscript(ctx, {
+      callId: "call_123",
+    });
+    ```
+
+    Returns `null` if the transcript has not been fetched yet. Call `getCallTranscript` first to populate the cache.
+  </Tab>
+</Tabs>
+
+## `CallSummary` response shape
+
+Both `createOutboundCall` and `endCall` return a `CallSummary`:
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | `string` | Provider call ID. |
+| `agentId` | `string \| null` | Agent that handled the call. |
+| `fromNumber` | `string` | Originating phone number. |
+| `toNumber` | `string` | Destination phone number. |
+| `direction` | `string` | `"inbound"`, `"outbound"`, or `"web"`. |
+| `status` | `string` | Current call status. |
+| `startedAt` | `string` | ISO 8601 timestamp when the call connected. |
+| `endedAt` | `string \| null` | ISO 8601 timestamp when the call ended, or `null` if still active. |
+| `durationSeconds` | `number \| null` | Total call duration in seconds. |
+
+<Note>
+Streaming transcripts and large binary recording responses must be handled through an app-owned Convex HTTP action. Convex values cannot stream, so passing a recording URL through the component is not supported. Use `agentphone.getCallRecording` to retrieve the recording URL and then fetch the binary separately.
+</Note>
+
+## Need durable, retryable calls?
+
+For scheduled call campaigns or situations where a mutation must kick off a call without blocking on the result, use the outbound queue:
+
+<CardGroup cols={1}>
+  <Card title="Outbound Queue" icon="arrow-right" href="/guides/outbound-queue">
+    Queue outbound and web calls from a mutation with idempotency keys, retry limits, and observable status.
+  </Card>
+</CardGroup>

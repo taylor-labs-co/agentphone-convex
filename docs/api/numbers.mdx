@@ -1,0 +1,283 @@
+---
+title: "Numbers API — Provision, Manage, and Attach Numbers"
+sidebarTitle: "Numbers"
+description: "Provision new phone numbers, retrieve and release existing ones, and attach or detach numbers from AgentPhone agents using the agentphone-convex client."
+---
+
+The numbers methods on the `AgentPhone` client wrap the AgentPhone REST API for phone number lifecycle management. All of these methods make live network calls to the AgentPhone API and must be called from a Convex `ActionCtx`. You can use them to provision new numbers, browse messages and calls for a number, and wire numbers to agents.
+
+<Note>
+  For reading cached number data without a live API call, see [Local Resources](/api/local-resources).
+</Note>
+
+---
+
+## `PhoneNumber` Type
+
+<ResponseField name="id" type="string">
+  The AgentPhone number ID.
+</ResponseField>
+
+<ResponseField name="phoneNumber" type="string">
+  The E.164 formatted phone number string (e.g. `"+15551234567"`).
+</ResponseField>
+
+<ResponseField name="country" type="string">
+  ISO 3166-1 alpha-2 country code (e.g. `"US"`).
+</ResponseField>
+
+<ResponseField name="status" type="string">
+  Current provisioning status (e.g. `"active"`, `"pending"`).
+</ResponseField>
+
+<ResponseField name="type" type="string | undefined">
+  Number type, such as `"local"` or `"toll-free"`.
+</ResponseField>
+
+<ResponseField name="agentId" type="string | null | undefined">
+  The ID of the agent this number is currently attached to, or `null` if unattached.
+</ResponseField>
+
+<ResponseField name="createdAt" type="string">
+  ISO 8601 timestamp when the number was provisioned.
+</ResponseField>
+
+---
+
+## `listNumbers`
+
+Returns a paginated list of all phone numbers in your AgentPhone account.
+
+```ts
+const response = await agentphone.listNumbers(ctx, { offset: 0 });
+const numbers = response.data ?? response.numbers ?? [];
+```
+
+**Parameters**
+
+<ParamField body="ctx" type="ActionCtx" required>
+  A Convex action context.
+</ParamField>
+
+<ParamField body="offset" type="number">
+  Number of records to skip for pagination.
+</ParamField>
+
+**Returns** `PhoneNumberListResponse`
+
+<ResponseField name="data" type="PhoneNumber[] | undefined">
+  The list of phone numbers (present in current API versions).
+</ResponseField>
+
+<ResponseField name="numbers" type="PhoneNumber[] | undefined">
+  Alternate field name for the list of phone numbers (present in some API versions).
+</ResponseField>
+
+<ResponseField name="total" type="number | undefined">
+  Total number of phone numbers in the account.
+</ResponseField>
+
+---
+
+## `getNumber`
+
+Returns a single phone number by its ID.
+
+```ts
+const number = await agentphone.getNumber(ctx, { numberId: "num_xyz789" });
+```
+
+**Parameters**
+
+<ParamField body="ctx" type="ActionCtx" required>
+  A Convex action context.
+</ParamField>
+
+<ParamField body="numberId" type="string" required>
+  The AgentPhone number ID to retrieve.
+</ParamField>
+
+**Returns** `PhoneNumber`
+
+---
+
+## `provisionNumber`
+
+Provisions a new phone number and optionally attaches it to an agent immediately. All arguments are optional; AgentPhone will select a number based on availability if you omit them.
+
+```ts
+const number = await agentphone.provisionNumber(ctx, {
+  country: "US",
+  areaCode: "415",
+  agentId: "agt_abc123",
+});
+```
+
+**Parameters**
+
+<ParamField body="ctx" type="ActionCtx" required>
+  A Convex action context.
+</ParamField>
+
+<ParamField body="country" type="string">
+  ISO 3166-1 alpha-2 country code for the desired number (e.g. `"US"`). Defaults to the account's default country.
+</ParamField>
+
+<ParamField body="areaCode" type="string">
+  Preferred area code for the number (e.g. `"415"`). AgentPhone will use availability to satisfy the request.
+</ParamField>
+
+<ParamField body="agentId" type="string">
+  If provided, the newly provisioned number is attached to this agent immediately.
+</ParamField>
+
+**Returns** `PhoneNumber`
+
+---
+
+## `releaseNumber`
+
+Permanently releases a phone number from your account. This action cannot be undone and stops all incoming calls and messages to the number.
+
+```ts
+await agentphone.releaseNumber(ctx, { numberId: "num_xyz789" });
+```
+
+<Warning>
+  Releasing a number is permanent. The number will be returned to the pool and may be assigned to another account immediately.
+</Warning>
+
+**Parameters**
+
+<ParamField body="ctx" type="ActionCtx" required>
+  A Convex action context.
+</ParamField>
+
+<ParamField body="numberId" type="string" required>
+  The AgentPhone number ID to release.
+</ParamField>
+
+---
+
+## `listNumberMessages`
+
+Returns a paginated list of messages sent or received by a phone number.
+
+```ts
+const messages = await agentphone.listNumberMessages(ctx, {
+  numberId: "num_xyz789",
+  limit: 50,
+});
+```
+
+**Parameters**
+
+<ParamField body="ctx" type="ActionCtx" required>
+  A Convex action context.
+</ParamField>
+
+<ParamField body="numberId" type="string" required>
+  The AgentPhone number ID.
+</ParamField>
+
+<ParamField body="limit" type="number">
+  Maximum number of messages to return per page.
+</ParamField>
+
+<ParamField body="before" type="string">
+  Cursor or ISO 8601 timestamp — return messages before this point.
+</ParamField>
+
+<ParamField body="after" type="string">
+  Cursor or ISO 8601 timestamp — return messages after this point.
+</ParamField>
+
+**Returns** The provider's message list response.
+
+---
+
+## `listCallsForNumber`
+
+Returns a paginated list of calls associated with a phone number.
+
+```ts
+const calls = await agentphone.listCallsForNumber(ctx, {
+  numberId: "num_xyz789",
+  limit: 25,
+  offset: 0,
+});
+```
+
+**Parameters**
+
+<ParamField body="ctx" type="ActionCtx" required>
+  A Convex action context.
+</ParamField>
+
+<ParamField body="numberId" type="string" required>
+  The AgentPhone number ID.
+</ParamField>
+
+<ParamField body="limit" type="number">
+  Maximum number of calls to return per page.
+</ParamField>
+
+<ParamField body="offset" type="number">
+  Number of calls to skip for pagination.
+</ParamField>
+
+**Returns** The provider's call list response.
+
+---
+
+## `attachNumberToAgent`
+
+Attaches an existing phone number to an agent so the agent handles its inbound calls and messages.
+
+```ts
+await agentphone.attachNumberToAgent(ctx, {
+  agentId: "agt_abc123",
+  numberId: "num_xyz789",
+});
+```
+
+**Parameters**
+
+<ParamField body="ctx" type="ActionCtx" required>
+  A Convex action context.
+</ParamField>
+
+<ParamField body="agentId" type="string" required>
+  The AgentPhone agent ID to attach the number to.
+</ParamField>
+
+<ParamField body="numberId" type="string" required>
+  The AgentPhone number ID to attach.
+</ParamField>
+
+---
+
+## `detachNumberFromAgent`
+
+Detaches a phone number from its current agent. The number remains provisioned in your account but will no longer be handled by the agent.
+
+```ts
+await agentphone.detachNumberFromAgent(ctx, {
+  agentId: "agt_abc123",
+  numberId: "num_xyz789",
+});
+```
+
+**Parameters**
+
+<ParamField body="ctx" type="ActionCtx" required>
+  A Convex action context.
+</ParamField>
+
+<ParamField body="agentId" type="string" required>
+  The AgentPhone agent ID to detach the number from.
+</ParamField>
+
+<ParamField body="numberId" type="string" required>
+  The AgentPhone number ID to detach.
+</ParamField>
