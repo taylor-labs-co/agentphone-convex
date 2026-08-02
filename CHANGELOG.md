@@ -13,9 +13,10 @@
   callback work asynchronously.
 - Expand typed AgentPhone helpers, examples, tests, package metadata, and
   tag-driven npm publishing with provenance.
-- Preserve practical 0.2 compatibility aliases and snake-case identifier
-  inputs while making the camel-case client canonical.
+- Preserve practical 0.2 compatibility aliases and snake-case identifier inputs
+  while making the camel-case client canonical.
 - Cache fetched call recordings alongside call transcripts.
+- Bind global webhook secret overrides to the configured component scope.
 
 ## 0.2.0
 

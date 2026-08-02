@@ -157,9 +157,23 @@ export class AgentPhone {
           );
         }
 
+        const requestedScope = new URL(request.url).searchParams.get("scope");
+        const usesSecretOverride = Boolean(this.webhookSecretOverride);
+        if (
+          usesSecretOverride &&
+          requestedScope !== null &&
+          requestedScope !== this.scope
+        ) {
+          return jsonResponse(
+            { error: "Webhook scope does not match configured scope" },
+            403,
+          );
+        }
+
+        const scope = usesSecretOverride
+          ? this.scope
+          : (requestedScope ?? this.scope);
         const rawBody = await request.text();
-        const scope =
-          new URL(request.url).searchParams.get("scope") ?? this.scope;
         const eventType =
           request.headers.get("X-Webhook-Event") ?? readEventType(rawBody);
         const callback = this.callbackFor(eventType);

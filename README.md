@@ -119,6 +119,12 @@ rotating signing secret inside the component. `configureProjectWebhook` is an
 alias. Use `configureAgentWebhook(ctx, { agentId })` for an agent override, or
 `setWebhookSecret` if the webhook was configured manually.
 
+Passing `AGENTPHONE_WEBHOOK_SECRET` directly to the client binds that webhook
+route to the client's configured scope; requests naming another scope receive a
+`403` response. To serve multiple scopes from one route, omit the global
+override and store a separate secret for every scope with `configureWebhook` or
+`setWebhookSecret`.
+
 Callbacks are internal mutations:
 
 ```ts
