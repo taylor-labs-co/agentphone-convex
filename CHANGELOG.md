@@ -21,6 +21,9 @@
   agent webhook configuration and delivery already use.
 - Retry outbound queue work only for transport failures so a post-send write
   failure can no longer resend an accepted message or call.
+- Record an accepted outbound send as `sent` with the storage error even when
+  its provider result cannot be written, instead of leaving the request stuck in
+  `sending`.
 - Fail queued outbound work immediately on definitive AgentPhone rejections
   instead of retrying statuses that cannot succeed.
 - Send a stable `Idempotency-Key` on every attempt of a queued outbound send so

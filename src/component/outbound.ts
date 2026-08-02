@@ -247,7 +247,7 @@ export const processRequest = internalAction({
       const delayMs = retryDelayMs(claimed.attempt);
       await ctx.runMutation(internal.outbound.markFailed, {
         requestId: args.requestId,
-        error: error instanceof Error ? error.message : String(error),
+        error: errorMessage(error),
         retry,
         ...(retry && { nextAttemptAt: Date.now() + delayMs }),
       });
@@ -263,19 +263,37 @@ export const processRequest = internalAction({
 
     // AgentPhone accepted the request. Everything below only persists that
     // outcome, so failures here are never retried through the send path.
-    const markSentArgs = { requestId: args.requestId, result };
     try {
-      await ctx.runMutation(internal.outbound.markSent, markSentArgs);
+      await ctx.runMutation(internal.outbound.markSent, {
+        requestId: args.requestId,
+        result,
+      });
     } catch (error) {
+      // The send already happened, so the request still has to reach a
+      // terminal state. Record it without the provider payload, which is the
+      // part that can fail to store, and schedule that write if it also fails.
+      const fallback = {
+        requestId: args.requestId,
+        result: null,
+        error: `AgentPhone accepted this request but its result could not be stored: ${errorMessage(error)}`,
+      };
       console.error(
-        "AgentPhone request sent but recording it failed; retrying the write",
+        "AgentPhone request sent but recording its result failed",
         error,
       );
-      await ctx.scheduler.runAfter(
-        PERSIST_RETRY_DELAY_MS,
-        internal.outbound.markSent,
-        markSentArgs,
-      );
+      try {
+        await ctx.runMutation(internal.outbound.markSent, fallback);
+      } catch (fallbackError) {
+        console.error(
+          "AgentPhone request sent but marking it sent failed; retrying the write",
+          fallbackError,
+        );
+        await ctx.scheduler.runAfter(
+          PERSIST_RETRY_DELAY_MS,
+          internal.outbound.markSent,
+          fallback,
+        );
+      }
     }
 
     try {
@@ -353,7 +371,12 @@ export const claim = internalMutation({
 });
 
 export const markSent = internalMutation({
-  args: { requestId: v.id("outboundRequests"), result: v.any() },
+  args: {
+    requestId: v.id("outboundRequests"),
+    result: v.any(),
+    /** Set when the send succeeded but its result could not be stored. */
+    error: v.optional(v.string()),
+  },
   returns: v.null(),
   handler: async (ctx, args) => {
     const row = await ctx.db.get("outboundRequests", args.requestId);
@@ -362,7 +385,7 @@ export const markSent = internalMutation({
       await ctx.db.patch("outboundRequests", args.requestId, {
         status: "sent",
         result: args.result,
-        error: undefined,
+        error: args.error,
         nextAttemptAt: undefined,
         messageId: stringField(result, ["message_id", "messageId", "id"]),
         callId: stringField(result, ["call_id", "callId", "id"]),
@@ -480,6 +503,10 @@ function isRetryableError(error: unknown) {
     return error.status === 408 || error.status === 429 || error.status >= 500;
   }
   return true;
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function retryDelayMs(attempt: number) {

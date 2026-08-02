@@ -221,6 +221,10 @@ forbidden requests fail immediately. Every attempt for a queued request sends
 the same `Idempotency-Key` header, so a retry after an ambiguous network failure
 is not treated as a new send.
 
+An accepted send always reaches a terminal state. If its provider result cannot
+be stored, the request is still marked `sent` and carries the storage error, so
+no accepted request is left stuck in `sending`.
+
 Set `testMode: true` on a direct or queued request—or on the client—to exercise
 the component without an API key or provider call.
 

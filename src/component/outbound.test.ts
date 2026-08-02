@@ -40,8 +40,10 @@ describe("durable outbound queue", () => {
       scope: "default",
       requestId: queued.requestId,
     });
-    expect(status).toMatchObject({ attempts: 1 });
-    expect(status?.status).not.toBe("queued");
+    // The request still reaches a terminal state, keeping the reason visible
+    // instead of leaving the row stuck in "sending".
+    expect(status).toMatchObject({ status: "sent", attempts: 1, result: null });
+    expect(status?.error).toContain("could not be stored");
   });
 
   test("retries transport failures until maxAttempts is exhausted", async () => {
