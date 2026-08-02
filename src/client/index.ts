@@ -50,6 +50,7 @@ import type {
 } from "./types.js";
 
 export * from "./types.js";
+export * from "./auth.js";
 
 export const eventValidator = agentPhoneEventValidator;
 export const storedEventValidator = schema.tables.events.validator;

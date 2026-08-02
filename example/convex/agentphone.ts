@@ -8,6 +8,7 @@ import { components, internal } from "./_generated/api.js";
 import {
   AgentPhone,
   eventValidator,
+  requireAgentPhoneScopeAccess,
   storedEventValidator,
   voiceResponseValidator,
 } from "agentphone-convex";
@@ -80,6 +81,7 @@ export const recentEvents = query({
   args: { limit: v.optional(v.number()) },
   returns: v.array(storedEventValidator),
   handler: async (ctx, args) => {
+    await requireAgentPhoneScopeAccess(ctx, { scope: agentphone.scope });
     return await agentphone.listEvents(ctx, args);
   },
 });
@@ -88,6 +90,7 @@ export const conversationState = query({
   args: { conversationId: v.string() },
   returns: v.any(),
   handler: async (ctx, args) => {
+    await requireAgentPhoneScopeAccess(ctx, { scope: agentphone.scope });
     return await agentphone.getLatestConversationState(ctx, {
       ...args,
       messageLimit: 25,

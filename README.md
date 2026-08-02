@@ -57,6 +57,31 @@ The optional scope isolates all component records, delivery IDs, webhook
 secrets, and queue idempotency keys. Use a stable tenant or workspace ID when a
 single Convex app serves multiple AgentPhone projects.
 
+### Authorization boundary
+
+Component scopes isolate records from one another, but they do not authorize
+your application's users. Any public Convex function that returns AgentPhone
+data must authenticate the caller and verify access to the configured scope.
+
+For applications that put workspace access in JWT claims, the package includes a
+fail-closed helper. By default it expects an `agentphone_scopes` claim
+containing one scope or an array of scopes:
+
+```ts
+export const recentEvents = query({
+  args: { limit: v.optional(v.number()) },
+  returns: v.array(storedEventValidator),
+  handler: async (ctx, args) => {
+    await requireAgentPhoneScopeAccess(ctx, { scope: agentphone.scope });
+    return await agentphone.listEvents(ctx, args);
+  },
+});
+```
+
+If your app stores memberships or roles in Convex, replace the claim helper with
+an indexed application-level membership lookup. Checking only that a user is
+signed in is not sufficient when multiple users or tenants share a deployment.
+
 ## Webhooks and inbound callbacks
 
 Register the HTTP route in `convex/http.ts`:
@@ -192,16 +217,19 @@ syncs update scoped component tables. Query them from normal Convex queries:
 ```ts
 import { v } from "convex/values";
 import { query } from "./_generated/server.js";
+import { requireAgentPhoneScopeAccess } from "agentphone-convex";
 import { agentphone } from "./agentphone.js";
 
 export const conversationState = query({
   args: { conversationId: v.string() },
   returns: v.any(),
-  handler: async (ctx, args) =>
-    await agentphone.getLatestConversationState(ctx, {
+  handler: async (ctx, args) => {
+    await requireAgentPhoneScopeAccess(ctx, { scope: agentphone.scope });
+    return await agentphone.getLatestConversationState(ctx, {
       ...args,
       messageLimit: 25,
-    }),
+    });
+  },
 });
 ```
 
