@@ -1,0 +1,5 @@
+src/**/*.test.ts
+example/
+PUBLISHING.md
+CONTRIBUTING.md
+.github/

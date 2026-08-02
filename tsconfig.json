@@ -1,17 +1,25 @@
 {
   "compilerOptions": {
-    "target": "ES2022",
-    "lib": ["ES2022", "DOM"],
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
+    "allowJs": true,
+    "checkJs": true,
     "strict": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "resolveJsonModule": true,
-    "types": ["node", "vitest/globals"],
-    "noUncheckedIndexedAccess": true,
-    "exactOptionalPropertyTypes": true
+    "target": "ESNext",
+    "lib": ["ES2023", "dom", "DOM.Iterable"],
+    "forceConsistentCasingInFileNames": true,
+    "allowSyntheticDefaultImports": true,
+    "noErrorTruncation": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "types": ["node"],
+    "composite": true,
+    "isolatedModules": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "rootDir": "./src",
+    "outDir": "./dist",
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true
   },
-  "include": ["src/**/*.ts", "tests/**/*.ts", "vitest.config.ts"],
-  "exclude": ["dist", "node_modules", "example/convex/_generated"]
+  "include": ["./src/**/*"]
 }

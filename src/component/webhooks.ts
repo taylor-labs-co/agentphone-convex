@@ -1,567 +1,421 @@
-import { action, internalAction, mutation, query } from "./_generated/server.js";
-import { internal } from "./_generated/api.js";
-import { v } from "convex/values";
 import type { FunctionHandle } from "convex/server";
-
-import { callAgentPhoneSdk } from "./lib/sdk.js";
+import { v, type Infer, type VString } from "convex/values";
 import {
-  extractWebhookSecret,
-  normalizeWebhookPayload,
-  parseWebhookBody,
-  redactedWebhookConfig,
-} from "./lib/webhookPayload.js";
+  action,
+  internalMutation,
+  internalQuery,
+  mutation,
+  type MutationCtx,
+} from "./_generated/server.js";
+import { internal } from "./_generated/api.js";
+import type { Doc } from "./_generated/dataModel.js";
+import { agentPhoneRequest } from "./request.js";
 import {
-  nextWebhookRetryDelayMs,
-  shouldRetryWebhookDispatch,
-} from "./lib/webhookDispatch.js";
-import { verifyAgentPhoneSignature } from "./lib/webhookSecurity.js";
-import {
-  json,
-  normalizedWebhookEvent,
-  paginationArgs,
-  stripUndefined,
-  webhookCallbackHandles,
-} from "./lib/validators.js";
+  agentPhoneEventValidator,
+  voiceWebhookResponseValidator,
+  webhookResponseValidator,
+} from "./validators.js";
 
-const CALLBACK_KEY = "default";
-const DEFAULT_HTTP_PREFIX = "/agentphone";
-const DEFAULT_WEBHOOK_EVENTS = [
-  "agent.message",
-  "agent.call_ended",
-  "agent.reaction",
-];
+type WebhookEvent = Infer<typeof agentPhoneEventValidator>;
+type CallbackResult = Infer<typeof voiceWebhookResponseValidator> | null;
+type ConfigArgs = {
+  scope: string;
+  secret: string;
+  webhookId?: string;
+  url?: string;
+  status?: string;
+  contextLimit?: number;
+  timeout?: number;
+  agentId?: string;
+  subAccountId?: string;
+  createdAt?: string;
+};
+type HandleResult =
+  | { kind: "success"; duplicate: boolean; callbackResult: CallbackResult }
+  | { kind: "error"; status: number; message: string };
+type InsertWebhookResult = {
+  duplicate: boolean;
+  callbackResult: CallbackResult;
+};
+const eventCallbackValidator = v.string() as VString<
+  FunctionHandle<"mutation", { event: WebhookEvent }, CallbackResult>
+>;
 
-const deliveryStatus = v.union(
-  v.literal("received"),
-  v.literal("duplicate"),
-  v.literal("retrying"),
-  v.literal("dispatched"),
-  v.literal("failed"),
-  v.literal("dead_letter"),
-  v.literal("ignored"),
-);
+const configFields = {
+  scope: v.string(),
+  secret: v.string(),
+  webhookId: v.optional(v.string()),
+  url: v.optional(v.string()),
+  status: v.optional(v.string()),
+  contextLimit: v.optional(v.number()),
+  timeout: v.optional(v.number()),
+  agentId: v.optional(v.string()),
+  subAccountId: v.optional(v.string()),
+  createdAt: v.optional(v.string()),
+};
 
-function callbackKey(agentId: string | undefined) {
-  return agentId ? `agent:${agentId}` : CALLBACK_KEY;
-}
-
-export const registerCallbacks = mutation({
+export const setSecret = mutation({
   args: {
-    agent_id: v.optional(v.string()),
-    callbacks: webhookCallbackHandles,
+    scope: v.string(),
+    secret: v.string(),
+    agentId: v.optional(v.string()),
+    subAccountId: v.optional(v.string()),
   },
-  returns: v.object({
-    key: v.string(),
-    callbacks: webhookCallbackHandles,
-  }),
-  handler: async (ctx, args) => {
-    const now = Date.now();
-    const key = callbackKey(args.agent_id);
-    const existing = await ctx.db
-      .query("callbackConfigs")
-      .withIndex("by_key", (q) => q.eq("key", key))
-      .unique();
-    if (existing) {
-      await ctx.db.patch(existing._id, {
-        agentId: args.agent_id,
-        handles: args.callbacks,
-        updatedAt: now,
-      });
-    } else {
-      await ctx.db.insert("callbackConfigs", {
-        key,
-        agentId: args.agent_id,
-        handles: args.callbacks,
-        createdAt: now,
-        updatedAt: now,
-      });
-    }
-    return { key, callbacks: args.callbacks };
+  returns: v.null(),
+  handler: async (ctx, args): Promise<null> => {
+    await upsertConfigDocument(ctx, args);
+    return null;
   },
 });
 
-export const getCallbacks = query({
+export const configure = action({
   args: {
-    agent_id: v.optional(v.string()),
-  },
-  returns: webhookCallbackHandles,
-  handler: async (ctx, args) => {
-    const config = await ctx.db
-      .query("callbackConfigs")
-      .withIndex("by_key", (q) => q.eq("key", callbackKey(args.agent_id)))
-      .unique();
-    return config?.handles ?? {};
-  },
-});
-
-export const getProjectWebhook = action({
-  args: {},
-  returns: json,
-  handler: async () => callAgentPhoneSdk("webhooks", "getWebhook"),
-});
-
-export const configureProjectWebhook = action({
-  args: {
+    token: v.string(),
+    scope: v.string(),
     url: v.string(),
-    event_types: v.optional(v.array(v.string())),
-    context_limit: v.optional(v.number()),
-    timeout_ms: v.optional(v.number()),
+    contextLimit: v.optional(v.number()),
+    timeout: v.optional(v.number()),
+    agentId: v.optional(v.string()),
+    subAccountId: v.optional(v.string()),
+    baseUrl: v.optional(v.string()),
   },
-  returns: json,
-  handler: async (ctx, args) => {
-    const response = await callAgentPhoneSdk(
-      "webhooks",
-      "createOrUpdateWebhook",
-      stripUndefined(args),
-    );
-    await ctx.runMutation(internal.state.upsertWebhookConfig, {
-      scope: "project",
-      url: args.url,
-      secret: extractWebhookSecret(response),
-      eventTypes: args.event_types,
-      contextLimit: args.context_limit,
-      timeoutMs: args.timeout_ms,
-      providerResponse: response,
+  returns: webhookResponseValidator,
+  handler: async (
+    ctx,
+    args,
+  ): Promise<Infer<typeof webhookResponseValidator>> => {
+    validateWebhookOptions(args.contextLimit, args.timeout);
+    const path = args.agentId
+      ? `agents/${encodeURIComponent(args.agentId)}/webhook`
+      : "webhooks";
+    const rawResponse = await agentPhoneRequest({
+      token: args.token,
+      method: "POST",
+      path,
+      subAccountId: args.subAccountId,
+      baseUrl: args.baseUrl,
+      body: {
+        url: args.url,
+        ...(args.contextLimit !== undefined && {
+          contextLimit: args.contextLimit,
+        }),
+        ...(args.timeout !== undefined && { timeout: args.timeout }),
+      },
     });
-    return redactedWebhookConfig(response as Record<string, unknown>);
-  },
-});
-
-export const ensureProjectWebhook = action({
-  args: {
-    url: v.optional(v.string()),
-    event_types: v.optional(v.array(v.string())),
-    context_limit: v.optional(v.number()),
-    timeout_ms: v.optional(v.number()),
-    http_prefix: v.optional(v.string()),
-  },
-  returns: json,
-  handler: async (ctx, args) => {
-    const siteUrl = process.env.CONVEX_SITE_URL;
-    const url =
-      args.url ??
-      (siteUrl
-        ? `${siteUrl}${args.http_prefix ?? DEFAULT_HTTP_PREFIX}/webhook`
-        : undefined);
-    if (!url) {
-      throw new Error(
-        "ensureProjectWebhook requires url or CONVEX_SITE_URL in the Convex environment.",
-      );
-    }
-    const eventTypes = args.event_types ?? DEFAULT_WEBHOOK_EVENTS;
-    const response = await callAgentPhoneSdk(
-      "webhooks",
-      "createOrUpdateWebhook",
-      stripUndefined({
-        url,
-        event_types: eventTypes,
-        context_limit: args.context_limit,
-        timeout_ms: args.timeout_ms,
-      }),
-    );
-    await ctx.runMutation(internal.state.upsertWebhookConfig, {
-      scope: "project",
-      url,
-      secret: extractWebhookSecret(response),
-      eventTypes,
-      contextLimit: args.context_limit,
-      timeoutMs: args.timeout_ms,
-      providerResponse: response,
-    });
-    return redactedWebhookConfig(response as Record<string, unknown>);
-  },
-});
-
-export const deleteProjectWebhook = action({
-  args: {},
-  returns: json,
-  handler: async (ctx) => {
-    const response = await callAgentPhoneSdk("webhooks", "deleteWebhook");
-    await ctx.runMutation(internal.state.deleteWebhookConfig, {
-      scope: "project",
+    const response = parseWebhookResponse(rawResponse);
+    await ctx.runMutation(internal.webhooks.upsertConfig, {
+      scope: args.scope,
+      secret: response.secret,
+      webhookId: response.id,
+      url: response.url,
+      status: response.status,
+      contextLimit: response.contextLimit,
+      timeout: response.timeout,
+      createdAt: response.createdAt,
+      ...(args.agentId && { agentId: args.agentId }),
+      ...(args.subAccountId && { subAccountId: args.subAccountId }),
     });
     return response;
   },
 });
 
-export const testProjectWebhook = action({
+export const remove = action({
   args: {
-    event_type: v.optional(v.string()),
-  },
-  returns: json,
-  handler: async (_ctx, args) =>
-    callAgentPhoneSdk("webhooks", "testWebhook", stripUndefined(args)),
-});
-
-export const getAgentWebhook = action({
-  args: {
-    agent_id: v.string(),
-  },
-  returns: json,
-  handler: async (_ctx, args) =>
-    callAgentPhoneSdk("agentWebhooks", "getAgentWebhook", args),
-});
-
-export const configureAgentWebhook = action({
-  args: {
-    agent_id: v.string(),
-    url: v.string(),
-    event_types: v.optional(v.array(v.string())),
-    context_limit: v.optional(v.number()),
-    timeout_ms: v.optional(v.number()),
-  },
-  returns: json,
-  handler: async (ctx, args) => {
-    const response = await callAgentPhoneSdk(
-      "agentWebhooks",
-      "createOrUpdateAgentWebhook",
-      stripUndefined(args),
-    );
-    await ctx.runMutation(internal.state.upsertWebhookConfig, {
-      scope: "agent",
-      agentId: args.agent_id,
-      url: args.url,
-      secret: extractWebhookSecret(response),
-      eventTypes: args.event_types,
-      contextLimit: args.context_limit,
-      timeoutMs: args.timeout_ms,
-      providerResponse: response,
-    });
-    return redactedWebhookConfig(response as Record<string, unknown>);
-  },
-});
-
-export const deleteAgentWebhook = action({
-  args: {
-    agent_id: v.string(),
-  },
-  returns: json,
-  handler: async (ctx, args) => {
-    const response = await callAgentPhoneSdk(
-      "agentWebhooks",
-      "deleteAgentWebhook",
-      args,
-    );
-    await ctx.runMutation(internal.state.deleteWebhookConfig, {
-      scope: "agent",
-      agentId: args.agent_id,
-    });
-    return response;
-  },
-});
-
-export const listAgentDeliveries = action({
-  args: {
-    agent_id: v.string(),
-    ...paginationArgs,
-  },
-  returns: json,
-  handler: async (_ctx, args) =>
-    callAgentPhoneSdk(
-      "agentWebhooks",
-      "listAgentDeliveries",
-      stripUndefined(args),
-    ),
-});
-
-export const testAgentWebhook = action({
-  args: {
-    agent_id: v.string(),
-    event_type: v.optional(v.string()),
-  },
-  returns: json,
-  handler: async (_ctx, args) =>
-    callAgentPhoneSdk(
-      "agentWebhooks",
-      "testAgentWebhook",
-      stripUndefined(args),
-    ),
-});
-
-export const listProviderDeliveries = action({
-  args: paginationArgs,
-  returns: json,
-  handler: async (_ctx, args) =>
-    callAgentPhoneSdk("webhooks", "listDeliveries", stripUndefined(args)),
-});
-
-export const deliveryStats = action({
-  args: {
-    hours: v.optional(v.number()),
-  },
-  returns: json,
-  handler: async (_ctx, args) =>
-    callAgentPhoneSdk("webhooks", "deliveryStats", stripUndefined(args)),
-});
-
-export const allTimeStats = action({
-  args: {},
-  returns: json,
-  handler: async () => callAgentPhoneSdk("webhooks", "allTimeStats"),
-});
-
-export const listStoredConfigs = query({
-  args: {},
-  returns: v.array(json),
-  handler: async (ctx) => {
-    const configs = await ctx.db.query("webhookConfigs").collect();
-    return configs.map(({ secret, providerResponse: _providerResponse, ...config }) => ({
-      ...config,
-      hasSecret: Boolean(secret),
-    }));
-  },
-});
-
-export const listDeliveries = query({
-  args: {
-    limit: v.optional(v.number()),
+    token: v.string(),
+    scope: v.string(),
     agentId: v.optional(v.string()),
-    event: v.optional(v.string()),
-    status: v.optional(deliveryStatus),
+    subAccountId: v.optional(v.string()),
+    baseUrl: v.optional(v.string()),
   },
-  returns: v.array(json),
+  returns: v.null(),
   handler: async (ctx, args) => {
-    const limit = Math.min(args.limit ?? 50, 200);
-    if (args.agentId) {
-      return await ctx.db
-        .query("webhookDeliveries")
-        .withIndex("by_agent", (q) => q.eq("agentId", args.agentId))
-        .order("desc")
-        .take(limit);
-    }
-    if (args.event) {
-      return await ctx.db
-        .query("webhookDeliveries")
-        .withIndex("by_event", (q) => q.eq("event", args.event))
-        .order("desc")
-        .take(limit);
-    }
-    if (args.status) {
-      return await ctx.db
-        .query("webhookDeliveries")
-        .withIndex("by_status", (q) => q.eq("status", args.status))
-        .order("desc")
-        .take(limit);
-    }
-    return await ctx.db
-      .query("webhookDeliveries")
-      .withIndex("by_receivedAt")
-      .order("desc")
-      .take(limit);
-  },
-});
-
-export const listFailedDeliveries = query({
-  args: {
-    limit: v.optional(v.number()),
-    agentId: v.optional(v.string()),
-  },
-  returns: v.array(json),
-  handler: async (ctx, args) => {
-    const max = Math.min(args.limit ?? 50, 200);
-    const failed = await ctx.db
-      .query("webhookDeliveries")
-      .withIndex("by_status", (q) => q.eq("status", "failed"))
-      .order("desc")
-      .take(max);
-    const deadLetters = await ctx.db
-      .query("webhookDeliveries")
-      .withIndex("by_status", (q) => q.eq("status", "dead_letter"))
-      .order("desc")
-      .take(max);
-    return [...failed, ...deadLetters]
-      .filter((row) => !args.agentId || row.agentId === args.agentId)
-      .sort((a, b) => b.receivedAt - a.receivedAt)
-      .slice(0, max);
-  },
-});
-
-export const cleanupDeliveries = action({
-  args: {
-    olderThanMs: v.optional(v.number()),
-    statuses: v.optional(v.array(deliveryStatus)),
-  },
-  returns: json,
-  handler: async (ctx, args) => {
-    const olderThan = Date.now() - (args.olderThanMs ?? 7 * 24 * 60 * 60 * 1000);
-    return ctx.runMutation(internal.state.cleanupWebhookDeliveries, {
-      olderThan,
-      statuses: args.statuses,
+    const path = args.agentId
+      ? `agents/${encodeURIComponent(args.agentId)}/webhook`
+      : "webhooks";
+    await agentPhoneRequest({
+      token: args.token,
+      method: "DELETE",
+      path,
+      subAccountId: args.subAccountId,
+      baseUrl: args.baseUrl,
     });
+    await ctx.runMutation(internal.webhooks.deleteConfig, {
+      scope: args.scope,
+    });
+    return null;
   },
 });
 
-export const replayDelivery = action({
+export const handle = action({
   args: {
-    webhookId: v.string(),
-  },
-  returns: json,
-  handler: async (ctx, args) => {
-    const event = (await ctx.runQuery(internal.state.getWebhookEvent, args)) as
-      | { normalized?: unknown }
-      | null;
-    if (!event?.normalized) {
-      return { replayed: false, error: "Webhook event not found." };
-    }
-    await ctx.runMutation(internal.state.markWebhookDelivery, {
-      webhookId: args.webhookId,
-      status: "received",
-      attempts: 0,
-      error: undefined,
-    });
-    await ctx.scheduler.runAfter(0, internal.webhooks.dispatchCallback, {
-      webhookId: args.webhookId,
-      normalized: event.normalized,
-      attempt: 1,
-    });
-    return { replayed: true };
-  },
-});
-
-export const verifyAndRecord = action({
-  args: {
+    scope: v.string(),
     rawBody: v.string(),
-    signature: v.optional(v.string()),
-    timestamp: v.optional(v.string()),
-    webhookId: v.string(),
+    signature: v.string(),
+    timestamp: v.string(),
+    deliveryId: v.string(),
+    secretOverride: v.optional(v.string()),
+    toleranceSeconds: v.optional(v.number()),
+    callback: v.optional(eventCallbackValidator),
   },
-  returns: v.object({
-    accepted: v.boolean(),
-    duplicate: v.boolean(),
-    normalized: v.optional(normalizedWebhookEvent),
-    error: v.optional(v.string()),
-  }),
-  handler: async (ctx, args) => {
-    let payload: unknown;
-    try {
-      payload = parseWebhookBody(args.rawBody);
-    } catch (error) {
+  returns: v.union(
+    v.object({
+      kind: v.literal("success"),
+      duplicate: v.boolean(),
+      callbackResult: v.any(),
+    }),
+    v.object({
+      kind: v.literal("error"),
+      status: v.number(),
+      message: v.string(),
+    }),
+  ),
+  handler: async (ctx, args): Promise<HandleResult> => {
+    const toleranceSeconds = args.toleranceSeconds ?? 300;
+    if (
+      !Number.isFinite(toleranceSeconds) ||
+      toleranceSeconds < 1 ||
+      toleranceSeconds > 3600
+    ) {
       return {
-        accepted: false,
-        duplicate: false,
-        error: error instanceof Error ? error.message : String(error),
+        kind: "error" as const,
+        status: 400,
+        message: "Invalid webhook timestamp tolerance",
       };
     }
 
-    const normalized = normalizeWebhookPayload(payload);
-    const secret = await ctx.runQuery(internal.state.getWebhookSecret, {
-      agentId: normalized.agentId,
-    });
+    const timestampSeconds = Number(args.timestamp);
+    if (
+      !Number.isInteger(timestampSeconds) ||
+      Math.abs(Date.now() / 1000 - timestampSeconds) > toleranceSeconds
+    ) {
+      return {
+        kind: "error" as const,
+        status: 401,
+        message: "Webhook timestamp is outside the allowed window",
+      };
+    }
+
+    const config: Doc<"webhookConfigs"> | null = args.secretOverride
+      ? null
+      : await ctx.runQuery(internal.webhooks.getConfig, { scope: args.scope });
+    const secret = args.secretOverride ?? config?.secret;
     if (!secret) {
       return {
-        accepted: false,
-        duplicate: false,
-        error: "No AgentPhone webhook secret is configured for this event.",
+        kind: "error" as const,
+        status: 500,
+        message: `No AgentPhone webhook secret configured for scope ${args.scope}`,
       };
     }
 
-    const verified = await verifyAgentPhoneSignature({
-      rawBody: args.rawBody,
-      signature: args.signature,
-      timestamp: args.timestamp,
+    const valid = await verifySignature(
+      args.rawBody,
+      args.signature,
+      args.timestamp,
       secret,
-    });
-    if (!verified) {
+    );
+    if (!valid) {
       return {
-        accepted: false,
-        duplicate: false,
-        error: "Invalid AgentPhone webhook signature.",
+        kind: "error" as const,
+        status: 401,
+        message: "Invalid AgentPhone webhook signature",
       };
     }
 
-    const recorded = await ctx.runMutation(internal.state.recordWebhookDelivery, {
-      webhookId: args.webhookId,
-      signature: args.signature,
-      timestamp: args.timestamp,
-      normalized,
-      payload,
-    });
-    if (!recorded.duplicate) {
-      await ctx.runMutation(internal.resources.upsertFromWebhook, {
-        webhookId: args.webhookId,
-        receivedAt: Date.now(),
-        normalized,
-        payload,
-      });
+    const parsed = parseWebhookEvent(args.rawBody);
+    if (parsed.kind === "error") {
+      return { kind: "error" as const, status: 400, message: parsed.message };
     }
+
+    const inserted: InsertWebhookResult = await ctx.runMutation(
+      internal.events.insertWebhook,
+      {
+        scope: args.scope,
+        deliveryId: args.deliveryId,
+        payload: parsed.event,
+        callback: args.callback,
+      },
+    );
     return {
-      accepted: true,
-      duplicate: recorded.duplicate,
-      normalized,
+      kind: "success" as const,
+      duplicate: inserted.duplicate,
+      callbackResult: inserted.callbackResult,
     };
   },
 });
 
-export const dispatchCallback = internalAction({
-  args: {
-    webhookId: v.string(),
-    normalized: normalizedWebhookEvent,
-    attempt: v.optional(v.number()),
-    maxAttempts: v.optional(v.number()),
+export const getConfig = internalQuery({
+  args: { scope: v.string() },
+  returns: v.union(
+    v.object({
+      ...configFields,
+      _id: v.id("webhookConfigs"),
+      _creationTime: v.number(),
+      updatedAt: v.number(),
+    }),
+    v.null(),
+  ),
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("webhookConfigs")
+      .withIndex("by_scope", (q) => q.eq("scope", args.scope))
+      .first();
   },
+});
+
+export const upsertConfig = internalMutation({
+  args: configFields,
   returns: v.null(),
   handler: async (ctx, args) => {
-    const callback = args.normalized.callback;
-    if (!callback) {
-      await ctx.runMutation(internal.state.markWebhookDelivery, {
-        webhookId: args.webhookId,
-        status: "ignored",
-      });
-      return null;
-    }
-    const handle = await ctx.runQuery(internal.state.getCallbackHandle, {
-      agentId: args.normalized.agentId,
-      callback,
-    });
-    if (!handle) {
-      await ctx.runMutation(internal.state.markWebhookDelivery, {
-        webhookId: args.webhookId,
-        status: "ignored",
-      });
-      return null;
-    }
+    await upsertConfigDocument(ctx, args);
+    return null;
+  },
+});
 
-    const attempt = args.attempt ?? 1;
-    const maxAttempts = args.maxAttempts ?? 3;
-    try {
-      await ctx.runAction(handle as FunctionHandle<"action">, args.normalized);
-      await ctx.runMutation(internal.state.markWebhookDelivery, {
-        webhookId: args.webhookId,
-        status: "dispatched",
-        attempts: attempt,
-        maxAttempts,
-        lastAttemptAt: Date.now(),
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (shouldRetryWebhookDispatch({ attempt, maxAttempts })) {
-        const delay = nextWebhookRetryDelayMs(attempt);
-        await ctx.runMutation(internal.state.markWebhookDelivery, {
-          webhookId: args.webhookId,
-          status: "retrying",
-          attempts: attempt,
-          maxAttempts,
-          error: message,
-          nextAttemptAt: Date.now() + delay,
-          lastAttemptAt: Date.now(),
-        });
-        await ctx.scheduler.runAfter(delay, internal.webhooks.dispatchCallback, {
-          webhookId: args.webhookId,
-          normalized: args.normalized,
-          attempt: attempt + 1,
-          maxAttempts,
-        });
-      } else {
-        await ctx.runMutation(internal.state.markWebhookDelivery, {
-          webhookId: args.webhookId,
-          status: "dead_letter",
-          attempts: attempt,
-          maxAttempts,
-          error: message,
-          lastAttemptAt: Date.now(),
-        });
-      }
+export const deleteConfig = internalMutation({
+  args: { scope: v.string() },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const config = await ctx.db
+      .query("webhookConfigs")
+      .withIndex("by_scope", (q) => q.eq("scope", args.scope))
+      .first();
+    if (config) {
+      await ctx.db.delete("webhookConfigs", config._id);
     }
     return null;
   },
 });
+
+async function upsertConfigDocument(ctx: MutationCtx, args: ConfigArgs) {
+  const existing = await ctx.db
+    .query("webhookConfigs")
+    .withIndex("by_scope", (q) => q.eq("scope", args.scope))
+    .first();
+  const value = { ...args, updatedAt: Date.now() };
+  if (existing) {
+    await ctx.db.replace("webhookConfigs", existing._id, value);
+  } else {
+    await ctx.db.insert("webhookConfigs", value);
+  }
+}
+
+async function verifySignature(
+  rawBody: string,
+  signature: string,
+  timestamp: string,
+  secret: string,
+) {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const digest = await crypto.subtle.sign(
+    "HMAC",
+    key,
+    new TextEncoder().encode(`${timestamp}.${rawBody}`),
+  );
+  const expected = `sha256=${toHex(digest)}`;
+  return constantTimeEqual(signature, expected);
+}
+
+function constantTimeEqual(left: string, right: string) {
+  const length = Math.max(left.length, right.length);
+  let mismatch = left.length ^ right.length;
+  for (let index = 0; index < length; index += 1) {
+    mismatch |= (left.charCodeAt(index) || 0) ^ (right.charCodeAt(index) || 0);
+  }
+  return mismatch === 0;
+}
+
+function toHex(value: ArrayBuffer) {
+  return Array.from(new Uint8Array(value), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
+}
+
+function parseWebhookEvent(
+  rawBody: string,
+):
+  | { kind: "success"; event: WebhookEvent }
+  | { kind: "error"; message: string } {
+  let value: unknown;
+  try {
+    value = JSON.parse(rawBody) as unknown;
+  } catch {
+    return { kind: "error", message: "Webhook body is not valid JSON" };
+  }
+  if (!isRecord(value)) {
+    return { kind: "error", message: "Webhook body must be an object" };
+  }
+  if (
+    typeof value.event !== "string" ||
+    typeof value.channel !== "string" ||
+    typeof value.timestamp !== "string" ||
+    !("data" in value)
+  ) {
+    return {
+      kind: "error",
+      message: "Webhook body is missing event, channel, timestamp, or data",
+    };
+  }
+  if (
+    value.agentId !== undefined &&
+    value.agentId !== null &&
+    typeof value.agentId !== "string"
+  ) {
+    return { kind: "error", message: "Webhook agentId must be a string" };
+  }
+  if (
+    value.recentHistory !== undefined &&
+    !Array.isArray(value.recentHistory)
+  ) {
+    return { kind: "error", message: "Webhook recentHistory must be an array" };
+  }
+  return { kind: "success", event: value as WebhookEvent };
+}
+
+function parseWebhookResponse(
+  value: unknown,
+): Infer<typeof webhookResponseValidator> {
+  if (!isRecord(value)) {
+    throw new Error("AgentPhone returned an invalid webhook configuration");
+  }
+  const requiredStrings = ["id", "url", "secret", "status", "createdAt"];
+  for (const key of requiredStrings) {
+    if (typeof value[key] !== "string") {
+      throw new Error(`AgentPhone webhook response is missing ${key}`);
+    }
+  }
+  if (
+    typeof value.contextLimit !== "number" ||
+    typeof value.timeout !== "number"
+  ) {
+    throw new Error("AgentPhone webhook response has invalid limits");
+  }
+  return value as Infer<typeof webhookResponseValidator>;
+}
+
+function validateWebhookOptions(
+  contextLimit: number | undefined,
+  timeout: number | undefined,
+) {
+  if (
+    contextLimit !== undefined &&
+    (!Number.isInteger(contextLimit) || contextLimit < 0 || contextLimit > 50)
+  ) {
+    throw new Error("contextLimit must be an integer between 0 and 50");
+  }
+  if (
+    timeout !== undefined &&
+    (!Number.isInteger(timeout) || timeout < 5 || timeout > 120)
+  ) {
+    throw new Error("timeout must be an integer between 5 and 120 seconds");
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}

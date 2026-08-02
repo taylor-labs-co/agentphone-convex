@@ -1,10 +1,18 @@
 {
   "name": "agentphone-convex",
-  "version": "0.2.0",
-  "description": "Convex component for AgentPhone agents, numbers, calls, conversations, and webhooks.",
-  "type": "module",
+  "description": "A production-ready Convex component for AgentPhone messaging, calls, reactive resources, durable outbound work, and webhooks.",
+  "version": "0.3.0",
   "license": "MIT",
   "private": false,
+  "keywords": [
+    "agentphone",
+    "convex",
+    "component",
+    "sms",
+    "voice",
+    "webhooks"
+  ],
+  "type": "module",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/taylor-labs-co/agentphone-convex.git"
@@ -17,49 +25,83 @@
     "access": "public",
     "registry": "https://registry.npmjs.org/"
   },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "convex dev --start 'npm run dev:build'",
+    "dev:build": "chokidar 'tsconfig*.json' 'src/**/*.ts' -i '**/*.test.ts' -c 'npm run build:codegen' --initial",
+    "predev": "convex init && npm run build:codegen",
+    "build": "rm -rf dist tsconfig.build.tsbuildinfo && tsc --project ./tsconfig.build.json",
+    "codegen": "convex codegen --component-dir ./src/component",
+    "build:codegen": "npm run codegen && npm run build",
+    "build:clean": "rm -f *.tsbuildinfo && npm run build:codegen",
+    "typecheck": "tsc --noEmit && tsc -p example/convex",
+    "lint": "eslint .",
+    "test": "vitest run --typecheck",
+    "test:watch": "vitest --typecheck --clearScreen false",
+    "test:coverage": "vitest run --coverage --coverage.reporter=text",
+    "verify": "npm run build && npm run typecheck && npm run test && npm run lint",
+    "prepare": "npm run build",
+    "prepublishOnly": "npm run verify"
+  },
   "files": [
     "dist",
     "example",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "CHANGELOG.md"
   ],
   "exports": {
+    "./package.json": "./package.json",
     ".": {
       "types": "./dist/client/index.d.ts",
-      "import": "./dist/client/index.js"
-    },
-    "./convex.config.js": {
-      "types": "./dist/component/convex.config.d.ts",
-      "import": "./dist/component/convex.config.js"
-    },
-    "./_generated/component.js": {
-      "types": "./dist/component/_generated/component.d.ts",
-      "import": "./dist/component/_generated/component.js"
+      "default": "./dist/client/index.js"
     },
     "./test": {
       "types": "./dist/test.d.ts",
-      "import": "./dist/test.js"
+      "default": "./dist/test.js"
+    },
+    "./_generated/component.js": {
+      "types": "./dist/component/_generated/component.d.ts"
+    },
+    "./_generated/component": {
+      "types": "./dist/component/_generated/component.d.ts"
+    },
+    "./convex.config.js": {
+      "types": "./dist/component/convex.config.d.ts",
+      "default": "./dist/component/convex.config.js"
+    },
+    "./convex.config": {
+      "types": "./dist/component/convex.config.d.ts",
+      "default": "./dist/component/convex.config.js"
     }
   },
-  "scripts": {
-    "codegen": "convex codegen --component-dir src/component",
-    "build": "tsc -p tsconfig.build.json",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run",
-    "verify": "npm run typecheck && npm run test && npm run build"
+  "peerDependencies": {
+    "convex": ">=1.42.0 <2",
+    "convex-test": ">=0.0.54 <1"
   },
-  "dependencies": {
-    "agentphone": "^1.0.13",
-    "convex": "^1.25.4"
+  "peerDependenciesMeta": {
+    "convex-test": {
+      "optional": true
+    }
   },
   "devDependencies": {
-    "@types/node": "^22.15.30",
-    "convex-test": "^0.0.35",
-    "typescript": "^5.8.3",
-    "vite": "^6.3.5",
-    "vitest": "^3.2.2"
+    "@convex-dev/eslint-plugin": "^2.0.0",
+    "@edge-runtime/vm": "^5.0.0",
+    "@eslint/js": "9.39.4",
+    "@types/node": "^24.12.2",
+    "chokidar-cli": "3.0.0",
+    "convex": "1.42.3",
+    "convex-test": "0.0.54",
+    "eslint": "9.39.4",
+    "globals": "^17.5.0",
+    "pkg-pr-new": "^0.0.82",
+    "prettier": "3.8.3",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.58.2",
+    "vitest": "4.1.4"
   },
-  "peerDependencies": {
-    "convex": ">=1.25.0"
-  }
+  "types": "./dist/client/index.d.ts",
+  "module": "./dist/client/index.js"
 }
