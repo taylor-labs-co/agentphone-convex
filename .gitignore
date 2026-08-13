@@ -9,3 +9,6 @@ node_modules
 *.tgz
 *.tsbuildinfo
 .env.local
+
+# Conductor writes this per machine; the shared settings live in settings.toml.
+.conductor/settings.local.toml
