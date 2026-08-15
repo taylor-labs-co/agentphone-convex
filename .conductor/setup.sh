@@ -23,7 +23,14 @@ log() { printf '[conductor:setup] %s\n' "$*"; }
 log "installing dependencies"
 npm ci
 
-bash "${REPO_ROOT}/scripts/bootstrap-infisical.sh"
+# Not fatal. The only thing the Infisical CLI does here is feed the secret sync
+# below, which is soft by design -- so a GitHub outage or a checksum mismatch
+# should cost a workspace its API keys, not its existence. Failing here under
+# `set -e` would stop setup before the deployment is even created, leaving a
+# workspace that cannot run anything at all.
+if ! bash "${REPO_ROOT}/scripts/bootstrap-infisical.sh"; then
+  log "could not install the Infisical CLI; continuing without the secret sync"
+fi
 
 # Amazon Linux 2023 ships glibc 2.34 and the precompiled convex-local-backend
 # needs 2.35, so the cloud computer keeps a 2.35 runtime and this helper points
