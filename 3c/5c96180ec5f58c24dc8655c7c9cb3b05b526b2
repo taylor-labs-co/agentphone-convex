@@ -1,0 +1,28 @@
+CHANGELOG.md
+  h_83bc5aaa251b9b 31-33
+docs/api/sub-accounts.mdx
+  h_83bc5aaa251b9b 117,192,204-212,217,223-229,253-261,266
+docs/guides/multi-tenant.mdx
+  h_83bc5aaa251b9b 164-171
+src/client/index.ts
+  h_83bc5aaa251b9b 429-433,447-450
+src/component/_generated/component.ts
+  h_83bc5aaa251b9b 914,937,954,959,971,976,1013
+src/component/subAccounts.test.ts
+  h_83bc5aaa251b9b 95-202,222,289-290,296-302
+src/component/subAccounts.ts
+  h_83bc5aaa251b9b 23-26,28,45,47-48,52-61,95,97-99,114-116,121-125,130,132,140-145,228-231,238,241-246,299-302,305,307-308,326-331,343-348,351-352,355,364,371-391,440-447,466-484,560-563
+src/component/validators.ts
+  h_83bc5aaa251b9b 32-36,40,48,52-53
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "3c5c96180ec5f58c24dc8655c7c9cb3b05b526b2",
+  "prompts": {},
+  "humans": {
+    "h_83bc5aaa251b9b": {
+      "author": "Evan Taylor <eltaylor1104@gmail.com>"
+    }
+  }
+}
