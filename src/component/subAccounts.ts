@@ -52,7 +52,8 @@ const claimResultValidator = v.union(
 /**
  * A finished create, and whether the registry could still bind it to the key
  * that asked for it. An unbound sub-account is recorded rather than lost, but
- * it is not a successful provisioning.
+ * it is not a successful provisioning. Binding recovers from a released claim
+ * when the create still knows the tenant key.
  */
 const finishResultValidator = v.object({
   bound: v.boolean(),
@@ -129,7 +130,14 @@ export const create = action({
 
     const finished: Infer<typeof finishResultValidator> = await ctx.runMutation(
       internal.subAccounts.finishClaim,
-      { scope: args.scope, claimId: claim.claimId, response },
+      {
+        scope: args.scope,
+        claimId: claim.claimId,
+        response,
+        // Pass the key so a late AgentPhone response can still bind the tenant
+        // if the claim row was released after its lease lapsed mid-request.
+        ...(args.key && { key: args.key }),
+      },
     );
     await recordEventBestEffort(
       ctx,
@@ -139,7 +147,7 @@ export const create = action({
     );
     if (!finished.bound) {
       throw new Error(
-        `AgentPhone created sub-account ${finished.record.subAccountId} but its provisioning claim had already been released, so nothing binds it to key ${args.key}. It is recorded without a key: bind it with adoptSubAccount or delete it with deleteSubAccount.`,
+        `AgentPhone created sub-account ${finished.record.subAccountId} but nothing binds it to a tenant key. It is recorded without a key: bind it with adoptSubAccount or delete it with deleteSubAccount.`,
       );
     }
     return finished.record;
@@ -227,8 +235,10 @@ export const adopt = mutation({
 /**
  * Drop an unsettled provisioning claim so the key can be provisioned again.
  * Live claims are refused so a release cannot pull the ledger out from under a
- * create that is still waiting on AgentPhone, and active entries are never
- * released — delete those with `remove`.
+ * create that is still waiting on AgentPhone. A create that outlasts its lease
+ * can still finish safely: `finishClaim` recovers the tenant key even if this
+ * mutation deleted the claim row. Active entries are never released — delete
+ * those with `remove`.
  */
 export const releaseClaimByKey = mutation({
   args: { scope: v.string(), key: v.string() },
@@ -327,6 +337,7 @@ export const finishClaim = internalMutation({
     scope: v.string(),
     claimId: v.id("subAccounts"),
     response: v.any(),
+    key: v.optional(v.string()),
   },
   returns: finishResultValidator,
   handler: async (ctx, args) => {
@@ -341,18 +352,23 @@ export const finishClaim = internalMutation({
       );
     }
     const name = asString(payload.name) ?? claimed?.name;
-    // A claim released mid-create leaves nothing to bind the sub-account to,
-    // so record it keyless: the caller reports the failure, and the account
-    // stays visible for adoptSubAccount instead of being lost.
+    // Prefer the claim row's key, but fall back to the key the create was
+    // asked for. A claim can disappear after its lease if an operator
+    // released it while AgentPhone was still answering; recovering by key
+    // keeps the tenant binding and stops a retry from provisioning twice.
+    const key = claimed?.key ?? args.key;
     const record = await upsertActive(ctx, {
       scope: args.scope,
       subAccountId,
       payload: args.response,
       ...(claimed && { claimId: args.claimId }),
-      ...(claimed?.key && { key: claimed.key }),
+      ...(key && { key }),
       ...(name && { name }),
     });
-    return { bound: claimed !== null, record };
+    return {
+      bound: key !== undefined && record.key === key,
+      record,
+    };
   },
 });
 

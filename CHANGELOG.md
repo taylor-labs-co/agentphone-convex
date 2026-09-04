@@ -29,8 +29,10 @@
   are released when AgentPhone definitively rejects the create, and unresolved
   claims are reported for explicit recovery instead of risking a duplicate.
   Claims are leased, so releasing one cannot cut in front of a create that is
-  still waiting on AgentPhone, and a registry entry's tenant key and
-  sub-account id are never reassigned across an existing binding.
+  still waiting on AgentPhone, and a late AgentPhone response still binds its
+  tenant key if the claim was released after the lease lapsed. A registry
+  entry's tenant key and sub-account id are never reassigned across an
+  existing binding.
 - Sub-account management methods throw on a client bound to a sub-account,
   matching AgentPhone's single level of nesting.
 - The webhook route accepts any scope derived from the client it was registered

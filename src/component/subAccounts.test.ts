@@ -114,47 +114,51 @@ describe("sub-account provisioning", () => {
     ).toMatchObject({ status: "provisioning" });
   });
 
-  test("records a sub-account whose claim was released while it was created", async () => {
+  test("binds a late AgentPhone response even if the claim lease lapsed", async () => {
     vi.useFakeTimers();
     const testConvex = initConvexTest();
     // The claim outlives its lease and is released while AgentPhone answers.
+    // The create must still bind the tenant key so a retry cannot provision a
+    // second provider account for the same key.
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => {
         vi.advanceTimersByTime(10 * 60 * 1000);
-        await testConvex.mutation(api.subAccounts.releaseClaimByKey, {
-          scope: "master",
-          key: "tenant_1",
-        });
+        expect(
+          await testConvex.mutation(api.subAccounts.releaseClaimByKey, {
+            scope: "master",
+            key: "tenant_1",
+          }),
+        ).toBe(true);
         return Response.json({ id: "sub_123", name: "Acme" });
       }),
     );
 
-    await expect(
-      testConvex.action(api.subAccounts.create, {
-        token: "test_token",
-        scope: "master",
-        name: "Acme",
-        key: "tenant_1",
-      }),
-    ).rejects.toThrow("already been released");
-
-    // The sub-account is not lost, and no key claims it.
-    const orphan = await testConvex.query(api.subAccounts.get, {
+    const created = await testConvex.action(api.subAccounts.create, {
+      token: "test_token",
       scope: "master",
-      subAccountId: "sub_123",
+      name: "Acme",
+      key: "tenant_1",
     });
-    expect(orphan).toMatchObject({
+    expect(created).toMatchObject({
+      key: "tenant_1",
       subAccountId: "sub_123",
       status: "active",
     });
-    expect(orphan?.key).toBeUndefined();
+
+    const fetchMock = createResponse("sub_other", "Acme");
+    vi.stubGlobal("fetch", fetchMock);
+    const again = await testConvex.action(api.subAccounts.create, {
+      token: "test_token",
+      scope: "master",
+      name: "Acme",
+      key: "tenant_1",
+    });
+    expect(again).toEqual(created);
+    expect(fetchMock).not.toHaveBeenCalled();
     expect(
-      await testConvex.query(api.subAccounts.get, {
-        scope: "master",
-        key: "tenant_1",
-      }),
-    ).toBeNull();
+      await testConvex.query(api.subAccounts.list, { scope: "master" }),
+    ).toHaveLength(1);
   });
 
   test("never reassigns a key or sub-account that is already bound", async () => {
