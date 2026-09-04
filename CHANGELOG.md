@@ -31,11 +31,10 @@
   Claims are leased, so releasing one cannot cut in front of a create that is
   still waiting on AgentPhone. An expired `provisioning` claim is demoted to
   `unresolved` rather than deleted, so a late AgentPhone response still finishes
-  against the same claim; freeing a lease-demoted claim requires an explicit
-  `force` release after confirming nothing is still in flight. A late finish
-  whose claim was deleted never replaces a newer claim for that key. A registry
-  entry's tenant key and sub-account id are never reassigned across an
-  existing binding.
+  against the same claim; that lease-demoted claim stays reserved until the
+  originating create's action budget has elapsed. A late finish whose claim was
+  deleted never replaces a newer claim for that key. A registry entry's tenant
+  key and sub-account id are never reassigned across an existing binding.
 - Sub-account management methods throw on a client bound to a sub-account,
   matching AgentPhone's single level of nesting.
 - The webhook route accepts any scope derived from the client it was registered

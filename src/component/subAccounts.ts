@@ -29,6 +29,14 @@ export type ProvisionedSubAccount = Infer<
  */
 const CLAIM_LEASE_MS = 5 * 60 * 1000;
 
+/**
+ * Upper bound on how long the originating `createSubAccount` action can still
+ * be awaiting AgentPhone. Lease-demoted claims stay reserved for this long
+ * from claim creation so a release cannot free the key while a provider
+ * response remains possible.
+ */
+const CREATE_ACTION_BUDGET_MS = 10 * 60 * 1000;
+
 /** Marker left when a release demotes an expired provisioning claim. */
 const LEASE_EXPIRED_ERROR =
   "Provisioning claim lease expired without a result";
@@ -244,15 +252,15 @@ export const adopt = mutation({
  * create that is still waiting on AgentPhone. After the lease lapses a
  * `provisioning` claim is demoted to `unresolved` and this returns `false`, so
  * a late AgentPhone response can still finish against the same claim row.
- * Lease-demoted claims stay reserved until the create finishes, is adopted, or
- * an explicit `force` release confirms nothing is still in flight. Active
- * entries are never released — delete those with `remove`.
+ * Lease-demoted claims stay reserved until the originating create's action
+ * budget has elapsed — forcing an early free would let a replacement create
+ * race a still-possible provider response. Active entries are never released —
+ * delete those with `remove`.
  */
 export const releaseClaimByKey = mutation({
   args: {
     scope: v.string(),
     key: v.string(),
-    force: v.optional(v.boolean()),
   },
   returns: v.boolean(),
   handler: async (ctx, args) => {
@@ -278,12 +286,16 @@ export const releaseClaimByKey = mutation({
       return false;
     }
     // An unresolved claim demoted after lease expiry may still have a create
-    // waiting on AgentPhone. Keep it reserved unless the caller explicitly
-    // forces release after confirming the outcome.
-    if (row.error === LEASE_EXPIRED_ERROR && !args.force) {
-      throw new Error(
-        `The claim for key ${args.key} was demoted after its lease expired and a createSubAccount call may still be waiting on AgentPhone. Wait for that call to finish, adoptSubAccount if AgentPhone already created one, or pass force: true only if you are sure nothing is still in flight.`,
-      );
+    // waiting on AgentPhone. Keep it reserved until that action must have
+    // finished or timed out; only then is a replacement create safe.
+    if (row.error === LEASE_EXPIRED_ERROR) {
+      const remainingMs =
+        row._creationTime + CREATE_ACTION_BUDGET_MS - Date.now();
+      if (remainingMs > 0) {
+        throw new Error(
+          `The claim for key ${args.key} was demoted after its lease expired and a createSubAccount call may still be waiting on AgentPhone. It becomes releasable in ${Math.ceil(remainingMs / 1000)}s when any in-flight create must have finished or timed out. Until then wait for that call, or adoptSubAccount if AgentPhone already created one.`,
+        );
+      }
     }
     await ctx.db.delete("subAccounts", row._id);
     return true;

@@ -448,22 +448,18 @@ export class AgentPhone {
    * Returns false when the key has no claim or already names a sub-account.
    * Throws while a claim is still live. An expired provisioning claim is
    * demoted to unresolved on the first release (returns false) so a late
-   * create can still finish. Pass `force: true` only after confirming that
-   * create is gone, to free a lease-demoted claim; claims a create marked
-   * unresolved itself are releasable without force.
+   * create can still finish, and stays reserved until that create's action
+   * budget has elapsed. Claims a create itself marked unresolved are
+   * releasable immediately.
    */
   async releaseSubAccountClaim(
     ctx: MutationCtx | ActionCtx,
-    args: { key: string; force?: boolean },
+    args: { key: string },
   ): Promise<boolean> {
     this.assertMasterAccount("releaseSubAccountClaim");
     return await ctx.runMutation(
       this.componentApi.subAccounts.releaseClaimByKey,
-      {
-        scope: this.scope,
-        key: args.key,
-        ...(args.force !== undefined && { force: args.force }),
-      },
+      { scope: this.scope, key: args.key },
     );
   }
 

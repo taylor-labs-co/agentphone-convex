@@ -278,7 +278,7 @@ Master-account operations. Calling them on a client bound to a sub-account throw
 | `listSubAccounts(ctx, args?)` | Action | List sub-accounts as AgentPhone reports them. |
 | `syncSubAccounts(ctx, args?)` | Action | Reconcile the local registry with AgentPhone. |
 | `adoptSubAccount(ctx, args)` | Mutation / Action | Bind an existing sub-account to this scope and an optional key. |
-| `releaseSubAccountClaim(ctx, args)` | Mutation / Action | Drop an unfinished provisioning claim. Lease-demoted claims need `force: true`. |
+| `releaseSubAccountClaim(ctx, args)` | Mutation / Action | Drop an unfinished provisioning claim. Lease-demoted claims stay reserved through the create action budget. |
 | `listLocalSubAccounts(ctx, args?)` | Query / Mutation / Action | Read the registry reactively. |
 | `getLocalSubAccount(ctx, args)` | Query / Mutation / Action | Look up one registry entry by `key` or `subAccountId`. |
 
