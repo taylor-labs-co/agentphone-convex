@@ -20,11 +20,12 @@ export type ProvisionedSubAccount = Infer<
 >;
 
 /**
- * A provisioning claim whose action died before AgentPhone answered stays
- * claimed for this long. After that the entry is reported as stale rather than
- * retried, because a retry could create a second sub-account for one tenant.
+ * How long a `provisioning` claim is treated as live. Within the lease the
+ * create that took it may still be waiting on AgentPhone, so the claim is
+ * neither reclaimed nor released. A create that ends without learning the
+ * outcome marks its claim `unresolved` instead of waiting out the lease.
  */
-const CLAIM_STALE_MS = 5 * 60 * 1000;
+const CLAIM_LEASE_MS = 5 * 60 * 1000;
 
 const ID_KEYS = ["id", "subAccountId", "sub_account_id"];
 
@@ -41,11 +42,22 @@ const claimResultValidator = v.union(
   }),
   v.object({ kind: v.literal("in_flight"), key: v.string() }),
   v.object({
-    kind: v.literal("stale"),
+    kind: v.literal("unresolved"),
     key: v.string(),
-    claimedAt: v.number(),
+    at: v.number(),
+    error: v.optional(v.string()),
   }),
 );
+
+/**
+ * A finished create, and whether the registry could still bind it to the key
+ * that asked for it. An unbound sub-account is recorded rather than lost, but
+ * it is not a successful provisioning.
+ */
+const finishResultValidator = v.object({
+  bound: v.boolean(),
+  record: provisionedSubAccountValidator,
+});
 
 /**
  * Create a sub-account under the master account. Passing `key` makes the call
@@ -80,11 +92,11 @@ export const create = action({
         `Another createSubAccount call for key ${claim.key} is still provisioning. Retry once it settles.`,
       );
     }
-    if (claim.kind === "stale") {
+    if (claim.kind === "unresolved") {
       throw new Error(
-        `A createSubAccount call for key ${claim.key} started at ${new Date(
-          claim.claimedAt,
-        ).toISOString()} never finished, so AgentPhone may already hold a sub-account for it. Run syncSubAccounts, then either adoptSubAccount to bind the existing sub-account to this key or releaseSubAccountClaim to provision a new one.`,
+        `A createSubAccount call for key ${claim.key} never settled (last update ${new Date(
+          claim.at,
+        ).toISOString()}${claim.error ? `: ${claim.error}` : ""}), so AgentPhone may already hold a sub-account for it. Run syncSubAccounts, then either adoptSubAccount to bind the existing sub-account to this key or releaseSubAccountClaim to provision a new one.`,
       );
     }
 
@@ -99,17 +111,25 @@ export const create = action({
         ...(args.baseUrl && { baseUrl: args.baseUrl }),
       });
     } catch (error) {
+      // A definitive rejection created nothing, so the key is free again. Any
+      // other failure leaves the outcome unknown: hand the claim over for
+      // explicit recovery rather than letting a retry risk a second account.
       if (createDefinitelyFailed(error)) {
         await ctx.runMutation(internal.subAccounts.releaseClaim, {
           claimId: claim.claimId,
+        });
+      } else {
+        await ctx.runMutation(internal.subAccounts.markUnresolved, {
+          claimId: claim.claimId,
+          error: errorMessage(error),
         });
       }
       throw error;
     }
 
-    const record: ProvisionedSubAccount = await ctx.runMutation(
+    const finished: Infer<typeof finishResultValidator> = await ctx.runMutation(
       internal.subAccounts.finishClaim,
-      { claimId: claim.claimId, response },
+      { scope: args.scope, claimId: claim.claimId, response },
     );
     await recordEventBestEffort(
       ctx,
@@ -117,7 +137,12 @@ export const create = action({
       "sub_account.created",
       response,
     );
-    return record;
+    if (!finished.bound) {
+      throw new Error(
+        `AgentPhone created sub-account ${finished.record.subAccountId} but its provisioning claim had already been released, so nothing binds it to key ${args.key}. It is recorded without a key: bind it with adoptSubAccount or delete it with deleteSubAccount.`,
+      );
+    }
+    return finished.record;
   },
 });
 
@@ -200,16 +225,24 @@ export const adopt = mutation({
 });
 
 /**
- * Drop an unfinished provisioning claim so the key can be provisioned again.
- * Active entries are never released; delete those with `remove`.
+ * Drop an unsettled provisioning claim so the key can be provisioned again.
+ * Live claims are refused so a release cannot pull the ledger out from under a
+ * create that is still waiting on AgentPhone, and active entries are never
+ * released — delete those with `remove`.
  */
 export const releaseClaimByKey = mutation({
   args: { scope: v.string(), key: v.string() },
   returns: v.boolean(),
   handler: async (ctx, args) => {
     const row = await findByKey(ctx, args.scope, args.key);
-    if (!row || row.status !== "provisioning") {
+    if (!row || row.status === "active") {
       return false;
+    }
+    const remainingMs = row.updatedAt + CLAIM_LEASE_MS - Date.now();
+    if (row.status === "provisioning" && remainingMs > 0) {
+      throw new Error(
+        `The provisioning claim for key ${args.key} is still live: a createSubAccount call may be waiting on AgentPhone. It becomes releasable in ${Math.ceil(remainingMs / 1000)}s if that call never reports back.`,
+      );
     }
     await ctx.db.delete("subAccounts", row._id);
     return true;
@@ -263,13 +296,16 @@ export const claim = internalMutation({
       return { kind: "existing" as const, record: asProvisioned(existing) };
     }
     if (existing) {
-      const age = Date.now() - existing.updatedAt;
-      return age < CLAIM_STALE_MS
+      const live =
+        existing.status === "provisioning" &&
+        Date.now() - existing.updatedAt < CLAIM_LEASE_MS;
+      return live
         ? { kind: "in_flight" as const, key: args.key! }
         : {
-            kind: "stale" as const,
+            kind: "unresolved" as const,
             key: args.key!,
-            claimedAt: existing.updatedAt,
+            at: existing.updatedAt,
+            ...(existing.error && { error: existing.error }),
           };
     }
     const now = Date.now();
@@ -287,15 +323,14 @@ export const claim = internalMutation({
 });
 
 export const finishClaim = internalMutation({
-  args: { claimId: v.id("subAccounts"), response: v.any() },
-  returns: provisionedSubAccountValidator,
+  args: {
+    scope: v.string(),
+    claimId: v.id("subAccounts"),
+    response: v.any(),
+  },
+  returns: finishResultValidator,
   handler: async (ctx, args) => {
     const claimed = await ctx.db.get("subAccounts", args.claimId);
-    if (!claimed) {
-      throw new Error(
-        "AgentPhone created a sub-account but its provisioning claim is gone",
-      );
-    }
     const payload = asRecord(args.response);
     const subAccountId = providerId(payload, ID_KEYS);
     if (!subAccountId) {
@@ -305,15 +340,19 @@ export const finishClaim = internalMutation({
         `AgentPhone returned a sub-account without an id: ${JSON.stringify(args.response)}`,
       );
     }
-    const name = asString(payload.name) ?? claimed.name;
-    return await upsertActive(ctx, {
-      scope: claimed.scope,
+    const name = asString(payload.name) ?? claimed?.name;
+    // A claim released mid-create leaves nothing to bind the sub-account to,
+    // so record it keyless: the caller reports the failure, and the account
+    // stays visible for adoptSubAccount instead of being lost.
+    const record = await upsertActive(ctx, {
+      scope: args.scope,
       subAccountId,
       payload: args.response,
-      claimId: args.claimId,
-      ...(claimed.key && { key: claimed.key }),
+      ...(claimed && { claimId: args.claimId }),
+      ...(claimed?.key && { key: claimed.key }),
       ...(name && { name }),
     });
+    return { bound: claimed !== null, record };
   },
 });
 
@@ -322,8 +361,29 @@ export const releaseClaim = internalMutation({
   returns: v.null(),
   handler: async (ctx, args) => {
     const row = await ctx.db.get("subAccounts", args.claimId);
-    if (row?.status === "provisioning") {
+    if (row && row.status !== "active") {
       await ctx.db.delete("subAccounts", args.claimId);
+    }
+    return null;
+  },
+});
+
+/**
+ * Hand a claim over for explicit recovery. The create that took it could not
+ * tell whether AgentPhone made the sub-account, so the key stays reserved but
+ * is no longer treated as live.
+ */
+export const markUnresolved = internalMutation({
+  args: { claimId: v.id("subAccounts"), error: v.string() },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const row = await ctx.db.get("subAccounts", args.claimId);
+    if (row?.status === "provisioning") {
+      await ctx.db.patch("subAccounts", args.claimId, {
+        status: "unresolved",
+        error: args.error,
+        updatedAt: Date.now(),
+      });
     }
     return null;
   },
@@ -377,9 +437,14 @@ export const deleteRecord = internalMutation({
 
 /**
  * Write the one registry entry that describes a sub-account, preferring the
- * claim that started it, then its tenant key, then its AgentPhone id. Entries
- * that turn out to describe the same sub-account are collapsed so a key and an
- * id can never disagree.
+ * claim that started it, then its tenant key, then its AgentPhone id.
+ *
+ * A key and a sub-account id each name at most one entry in a scope, and this
+ * never rewrites a binding that already exists: an entry still waiting for its
+ * id absorbs one, but reassigning a key or a sub-account that is already spoken
+ * for is refused rather than merged. Otherwise one tenant could take over
+ * another's sub-account and leave that tenant unmapped — free to provision a
+ * second provider account.
  */
 async function upsertActive(
   ctx: MutationCtx,
@@ -398,13 +463,25 @@ async function upsertActive(
   const byKey = args.key ? await findByKey(ctx, args.scope, args.key) : null;
   const byId = await findBySubAccountId(ctx, args.scope, args.subAccountId);
   const target = claimed ?? byKey ?? byId;
-  const duplicates = new Map(
-    [byKey, byId]
-      .filter((row) => row !== null && row._id !== target?._id)
-      .map((row) => [row!._id, row!]),
-  );
-  for (const duplicate of duplicates.values()) {
-    await ctx.db.delete("subAccounts", duplicate._id);
+
+  if (target?.subAccountId && target.subAccountId !== args.subAccountId) {
+    throw new Error(
+      `Key ${target.key} in scope ${args.scope} already names sub-account ${target.subAccountId}. Delete that sub-account before binding the key to ${args.subAccountId}.`,
+    );
+  }
+  if (
+    args.key !== undefined &&
+    byId?.key !== undefined &&
+    byId.key !== args.key
+  ) {
+    throw new Error(
+      `Sub-account ${args.subAccountId} in scope ${args.scope} already belongs to key ${byId.key}. Release that entry before binding the sub-account to ${args.key}.`,
+    );
+  }
+  // A keyless entry for the same sub-account describes what is now being
+  // recorded under a key, so it collapses into the target.
+  if (byId && byId._id !== target?._id) {
+    await ctx.db.delete("subAccounts", byId._id);
   }
 
   const now = Date.now();
@@ -478,6 +555,10 @@ function createDefinitelyFailed(error: unknown) {
     error.status !== 408 &&
     error.status !== 429
   );
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function validateName(name: string) {

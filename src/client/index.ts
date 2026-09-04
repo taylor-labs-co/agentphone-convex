@@ -426,7 +426,11 @@ export class AgentPhone {
   /**
    * Bind a sub-account AgentPhone already holds to this scope, optionally under
    * a tenant key. Use it to onboard sub-accounts created before this component
-   * or to resolve a provisioning claim that never finished.
+   * or to resolve a provisioning claim that never settled.
+   *
+   * Throws rather than reassigning an existing binding: a key that already
+   * names another sub-account, or a sub-account that already belongs to another
+   * key, has to be deleted or released first.
    */
   async adoptSubAccount(
     ctx: MutationCtx | ActionCtx,
@@ -440,8 +444,10 @@ export class AgentPhone {
   }
 
   /**
-   * Drop an unfinished provisioning claim so its key can be provisioned again.
-   * Returns false when the key has no claim or already names a sub-account.
+   * Drop an unsettled provisioning claim so its key can be provisioned again.
+   * Returns false when the key has no claim or already names a sub-account, and
+   * throws while a claim is still live, since the `createSubAccount` call
+   * holding it may be waiting on AgentPhone.
    */
   async releaseSubAccountClaim(
     ctx: MutationCtx | ActionCtx,

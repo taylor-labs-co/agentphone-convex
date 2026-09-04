@@ -161,11 +161,14 @@ See [Authorization](/guides/authorization) for the JWT-claim helper and when to 
     `adoptSubAccount({ subAccountId, key })` to bind each one to a tenant ID.
     From then on `createSubAccount` with that key is a no-op.
   </Accordion>
-  <Accordion title="A provisioning attempt that never finished">
-    If AgentPhone timed out or returned a `5xx`, the claim stays in place and
-    later attempts throw rather than risk a duplicate. Run `syncSubAccounts`,
-    then either `adoptSubAccount` (AgentPhone did create it) or
-    `releaseSubAccountClaim` (it did not).
+  <Accordion title="A provisioning attempt that never settled">
+    If AgentPhone timed out or returned a `5xx`, the claim is marked
+    `unresolved` and later attempts throw rather than risk a duplicate. Run
+    `syncSubAccounts`, then either `adoptSubAccount` (AgentPhone did create it)
+    or `releaseSubAccountClaim` (it did not). Claims are leased for five
+    minutes, so a claim whose action died is only releasable once the lease
+    lapses — a release can never cut in front of a create that is still
+    waiting on AgentPhone.
   </Accordion>
   <Accordion title="Offboarding a tenant">
     `deleteSubAccount` deletes the sub-account at AgentPhone and drops its

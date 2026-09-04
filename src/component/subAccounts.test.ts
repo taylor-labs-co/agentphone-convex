@@ -92,6 +92,114 @@ describe("sub-account provisioning", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  test("refuses to release a live claim out from under a create", async () => {
+    const testConvex = initConvexTest();
+    await testConvex.mutation(internal.subAccounts.claim, {
+      scope: "master",
+      name: "Acme",
+      key: "tenant_1",
+    });
+
+    await expect(
+      testConvex.mutation(api.subAccounts.releaseClaimByKey, {
+        scope: "master",
+        key: "tenant_1",
+      }),
+    ).rejects.toThrow("still live");
+    expect(
+      await testConvex.query(api.subAccounts.get, {
+        scope: "master",
+        key: "tenant_1",
+      }),
+    ).toMatchObject({ status: "provisioning" });
+  });
+
+  test("records a sub-account whose claim was released while it was created", async () => {
+    vi.useFakeTimers();
+    const testConvex = initConvexTest();
+    // The claim outlives its lease and is released while AgentPhone answers.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        vi.advanceTimersByTime(10 * 60 * 1000);
+        await testConvex.mutation(api.subAccounts.releaseClaimByKey, {
+          scope: "master",
+          key: "tenant_1",
+        });
+        return Response.json({ id: "sub_123", name: "Acme" });
+      }),
+    );
+
+    await expect(
+      testConvex.action(api.subAccounts.create, {
+        token: "test_token",
+        scope: "master",
+        name: "Acme",
+        key: "tenant_1",
+      }),
+    ).rejects.toThrow("already been released");
+
+    // The sub-account is not lost, and no key claims it.
+    const orphan = await testConvex.query(api.subAccounts.get, {
+      scope: "master",
+      subAccountId: "sub_123",
+    });
+    expect(orphan).toMatchObject({
+      subAccountId: "sub_123",
+      status: "active",
+    });
+    expect(orphan?.key).toBeUndefined();
+    expect(
+      await testConvex.query(api.subAccounts.get, {
+        scope: "master",
+        key: "tenant_1",
+      }),
+    ).toBeNull();
+  });
+
+  test("never reassigns a key or sub-account that is already bound", async () => {
+    const testConvex = initConvexTest();
+    await testConvex.mutation(api.subAccounts.adopt, {
+      scope: "master",
+      key: "tenant_1",
+      subAccountId: "sub_123",
+    });
+    await testConvex.mutation(api.subAccounts.adopt, {
+      scope: "master",
+      key: "tenant_2",
+      subAccountId: "sub_456",
+    });
+
+    await expect(
+      testConvex.mutation(api.subAccounts.adopt, {
+        scope: "master",
+        key: "tenant_1",
+        subAccountId: "sub_456",
+      }),
+    ).rejects.toThrow("already names sub-account sub_123");
+    await expect(
+      testConvex.mutation(api.subAccounts.adopt, {
+        scope: "master",
+        key: "tenant_3",
+        subAccountId: "sub_456",
+      }),
+    ).rejects.toThrow("already belongs to key tenant_2");
+
+    // Both tenants keep the sub-account they started with.
+    expect(
+      await testConvex.query(api.subAccounts.get, {
+        scope: "master",
+        key: "tenant_1",
+      }),
+    ).toMatchObject({ subAccountId: "sub_123" });
+    expect(
+      await testConvex.query(api.subAccounts.get, {
+        scope: "master",
+        key: "tenant_2",
+      }),
+    ).toMatchObject({ subAccountId: "sub_456" });
+  });
+
   test("reports an abandoned claim instead of risking a duplicate", async () => {
     vi.useFakeTimers();
     const fetchMock = createResponse("sub_123", "Acme");
@@ -111,7 +219,7 @@ describe("sub-account provisioning", () => {
         name: "Acme",
         key: "tenant_1",
       }),
-    ).rejects.toThrow("never finished");
+    ).rejects.toThrow("never settled");
     expect(fetchMock).not.toHaveBeenCalled();
 
     // Recovery: adopt the sub-account AgentPhone may already hold...
@@ -178,12 +286,20 @@ describe("sub-account provisioning", () => {
     await expect(
       testConvex.action(api.subAccounts.create, args),
     ).rejects.toThrow("500");
+    // Nothing is running any more, so the claim is releasable immediately
+    // rather than after the lease expires.
     expect(
       await testConvex.query(api.subAccounts.get, {
         scope: "master",
         key: "tenant_1",
       }),
-    ).toMatchObject({ status: "provisioning" });
+    ).toMatchObject({
+      status: "unresolved",
+      error: expect.stringContaining("500"),
+    });
+    await expect(
+      testConvex.action(api.subAccounts.create, args),
+    ).rejects.toThrow("never settled");
 
     expect(
       await testConvex.mutation(api.subAccounts.releaseClaimByKey, {

@@ -114,7 +114,7 @@ const subAccount = await agentphone.createSubAccount(ctx, {
 
 ### When provisioning cannot be settled safely
 
-A claim is released automatically when AgentPhone definitively rejects the request (`4xx`), so the key is free to try again. Timeouts, throttling, and `5xx` responses leave the outcome unknown: the claim stays in place and later calls throw rather than risk a second sub-account for one tenant. Recover explicitly:
+A claim is released automatically when AgentPhone definitively rejects the request (`4xx`), so the key is free to try again. Timeouts, throttling, and `5xx` responses leave the outcome unknown: the claim is marked `unresolved` and later calls throw rather than risk a second sub-account for one tenant. Recover explicitly:
 
 ```ts
 await agentphone.syncSubAccounts(ctx);            // what does AgentPhone actually hold?
@@ -189,7 +189,7 @@ const { synced } = await agentphone.syncSubAccounts(ctx, { limit: 100 });
 
 ## `adoptSubAccount`
 
-Binds a sub-account AgentPhone already holds to this scope, optionally under a tenant key. Use it to onboard sub-accounts created before this component, or to resolve a claim that never finished.
+Binds a sub-account AgentPhone already holds to this scope, optionally under a tenant key. Use it to onboard sub-accounts created before this component, or to resolve a claim that never settled.
 
 ```ts
 await agentphone.adoptSubAccount(ctx, {
@@ -201,15 +201,31 @@ await agentphone.adoptSubAccount(ctx, {
 
 Runs from a mutation or an action. **Returns** `AgentPhoneProvisionedSubAccount`.
 
+<Warning>
+  A key names at most one sub-account and a sub-account belongs to at most one
+  key. Adopting across an existing binding — a key that already names another
+  sub-account, or a sub-account that already belongs to another key — throws
+  instead of moving it, since silently reassigning would leave the displaced
+  tenant unmapped and free to provision a second provider account. Delete the
+  sub-account, or release the claim, before rebinding.
+</Warning>
+
 ---
 
 ## `releaseSubAccountClaim`
 
-Drops an unfinished provisioning claim so its key can be provisioned again. Returns `false` when the key has no claim, or already names a sub-account — active entries are only removed by `deleteSubAccount`.
+Drops an unsettled provisioning claim so its key can be provisioned again. Returns `false` when the key has no claim, or already names a sub-account — active entries are only removed by `deleteSubAccount`.
 
 ```ts
 const released = await agentphone.releaseSubAccountClaim(ctx, { key: tenantId });
 ```
+
+<Note>
+  A `provisioning` claim is leased for five minutes and cannot be released while
+  the lease holds, because the `createSubAccount` call that took it may still be
+  waiting on AgentPhone. Claims that a create explicitly could not settle are
+  marked `unresolved` and are releasable right away.
+</Note>
 
 ---
 
@@ -234,12 +250,18 @@ const entry = await agentphone.getLocalSubAccount(ctx, { key: tenantId });
 
 **Returns** `AgentPhoneSubAccount` entries:
 
-<ResponseField name="status" type='"provisioning" | "active"'>
-  `"provisioning"` is an in-flight or abandoned claim; it has no `subAccountId`
-  yet. `"active"` entries always do.
+<ResponseField name="status" type='"provisioning" | "unresolved" | "active"'>
+  `"provisioning"` is a claim a create still holds, `"unresolved"` is one whose
+  create ended without learning whether AgentPhone made the sub-account, and
+  `"active"` is a provisioned sub-account. Only `"active"` entries carry a
+  `subAccountId`.
+</ResponseField>
+
+<ResponseField name="error" type="string | undefined">
+  Why an `"unresolved"` claim could not be settled.
 </ResponseField>
 
 <ResponseField name="updatedAt" type="number">
   When the entry last changed. For a `"provisioning"` entry this is when the
-  claim was taken.
+  claim was taken, and it is what the five-minute lease is measured against.
 </ResponseField>

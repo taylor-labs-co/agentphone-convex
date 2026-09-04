@@ -911,6 +911,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         "internal",
         { key?: string; name?: string; scope: string; subAccountId: string },
         {
+          error?: string;
           key?: string;
           name?: string;
           payload: any;
@@ -933,6 +934,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           token: string;
         },
         {
+          error?: string;
           key?: string;
           name?: string;
           payload: any;
@@ -949,11 +951,12 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         "internal",
         { key?: string; scope: string; subAccountId?: string },
         {
+          error?: string;
           key?: string;
           name?: string;
           payload: any;
           scope: string;
-          status: "provisioning" | "active";
+          status: "provisioning" | "unresolved" | "active";
           subAccountId?: string;
           syncedAt: number;
           updatedAt: number;
@@ -965,11 +968,12 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         "internal",
         { limit?: number; scope: string },
         Array<{
+          error?: string;
           key?: string;
           name?: string;
           payload: any;
           scope: string;
-          status: "provisioning" | "active";
+          status: "provisioning" | "unresolved" | "active";
           subAccountId?: string;
           syncedAt: number;
           updatedAt: number;
@@ -1006,6 +1010,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           token: string;
         },
         {
+          error?: string;
           key?: string;
           name?: string;
           payload: any;
