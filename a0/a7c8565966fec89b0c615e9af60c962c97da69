@@ -1,0 +1,78 @@
+.gitignore
+  h_83bc5aaa251b9b 3
+CHANGELOG.md
+  h_83bc5aaa251b9b 3-35
+README.md
+  h_83bc5aaa251b9b 13-14,127,129-131,133-134,138,146,148,236-273,311-312,336-337
+docs/api/agentphone-class.mdx
+  h_83bc5aaa251b9b 49-50,67,96-102,267-284,352-353,371-372,392-394
+docs/api/configuration.mdx
+  h_83bc5aaa251b9b 35-41,87-88,94-100
+docs/api/event-queries.mdx
+  h_83bc5aaa251b9b 327-331,338
+docs/api/local-resources.mdx
+  h_83bc5aaa251b9b 13-16
+docs/api/sub-accounts.mdx
+  h_83bc5aaa251b9b 1-245
+docs/api/sync.mdx
+  h_83bc5aaa251b9b 29-40
+docs/concepts/component.mdx
+  h_83bc5aaa251b9b 59,74
+docs/concepts/scopes.mdx
+  h_83bc5aaa251b9b 44-58,69
+docs/docs.json
+  h_83bc5aaa251b9b 52,100-105
+docs/guides/multi-tenant.mdx
+  h_83bc5aaa251b9b 1-181
+docs/guides/webhooks.mdx
+  h_83bc5aaa251b9b 63,68,75,77,86-87
+docs/index.mdx
+  h_83bc5aaa251b9b 45-47
+docs/introduction.mdx
+  h_83bc5aaa251b9b 34-36
+docs/quickstart.mdx
+  h_83bc5aaa251b9b 114,121,123-124,130-131
+example/convex/agentphone.ts
+  h_83bc5aaa251b9b 10,13,25,28-30,111-159
+package.json
+  h_83bc5aaa251b9b 4
+src/client/index.ts
+  h_83bc5aaa251b9b 11,42,70-79,94-99,103,135,146,296-477,1604-1615,1658-1659,1662-1669,1875-1889
+src/client/routes.test.ts
+  h_83bc5aaa251b9b 128-162,174-175
+src/client/subAccounts.test.ts
+  h_83bc5aaa251b9b 1-112
+src/client/types.ts
+  h_83bc5aaa251b9b 328-341
+src/component/_generated/api.ts
+  h_83bc5aaa251b9b 19,40
+src/component/_generated/component.ts
+  h_83bc5aaa251b9b 908-1020,1102-1114
+src/component/deliveries.ts
+  h_83bc5aaa251b9b 22-26,29,39,69-72,100-103,132,164,168
+src/component/lib/resourceState.ts
+  h_83bc5aaa251b9b 30-31
+src/component/schema.ts
+  h_83bc5aaa251b9b 8,74-82
+src/component/subAccounts.test.ts
+  h_83bc5aaa251b9b 1-260
+src/component/subAccounts.ts
+  h_83bc5aaa251b9b 1-526
+src/component/sync.ts
+  h_83bc5aaa251b9b 25-46
+src/component/validators.ts
+  h_83bc5aaa251b9b 31-60
+src/component/webhooks.ts
+  h_83bc5aaa251b9b 41-45
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "a0a7c8565966fec89b0c615e9af60c962c97da69",
+  "prompts": {},
+  "humans": {
+    "h_83bc5aaa251b9b": {
+      "author": "Evan Taylor <eltaylor1104@gmail.com>"
+    }
+  }
+}
