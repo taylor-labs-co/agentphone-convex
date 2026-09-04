@@ -16,6 +16,7 @@ import type * as messages from "../messages.js";
 import type * as outbound from "../outbound.js";
 import type * as request from "../request.js";
 import type * as resources from "../resources.js";
+import type * as subAccounts from "../subAccounts.js";
 import type * as sync from "../sync.js";
 import type * as validators from "../validators.js";
 import type * as webhooks from "../webhooks.js";
@@ -36,6 +37,7 @@ const fullApi: ApiFromModules<{
   outbound: typeof outbound;
   request: typeof request;
   resources: typeof resources;
+  subAccounts: typeof subAccounts;
   sync: typeof sync;
   validators: typeof validators;
   webhooks: typeof webhooks;

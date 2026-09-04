@@ -26,6 +26,18 @@ Every sync method returns a `SyncResult<T>` object.
 
 ---
 
+## `syncSubAccounts`
+
+Fetches one page of sub-accounts from the AgentPhone API and merges them into the sub-account registry, keeping the tenant keys already bound to them. Master-account only — see [Sub-Accounts](/api/sub-accounts).
+
+```ts
+const { synced } = await agentphone.syncSubAccounts(ctx, { limit: 100 });
+```
+
+**Returns** `SyncResult`
+
+---
+
 ## `syncAgents`
 
 Fetches one page of agents from the AgentPhone API and upserts them into the local agents mirror.

@@ -10,6 +10,10 @@ The `AgentPhone` client maintains scoped, index-backed mirrors of every resource
   Mirrors are kept current automatically by incoming webhooks, direct sends and calls, queued outbound work, transcript fetches, and explicit sync calls. You can also backfill them on demand using the [Sync API](/api/sync).
 </Note>
 
+<Tip>
+  The sub-account registry is read the same way, with `listLocalSubAccounts` and `getLocalSubAccount`. It is a registry rather than a mirror — it also records in-flight provisioning claims — so it lives in the [Sub-Accounts reference](/api/sub-accounts).
+</Tip>
+
 ---
 
 ## Agents

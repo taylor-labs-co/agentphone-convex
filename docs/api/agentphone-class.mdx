@@ -46,7 +46,8 @@ These properties are set at construction time and cannot be changed afterward.
 
 <ResponseField name="subAccountId" type="string">
   Optional sub-account identifier forwarded to all API calls that do not supply
-  their own `subAccountId`.
+  their own `subAccountId`. Usually set for you by
+  [`forSubAccount`](/api/sub-accounts).
 </ResponseField>
 
 <ResponseField name="defaultAgentId" type="string">
@@ -63,7 +64,7 @@ These properties are set at construction time and cannot be changed afterward.
 
 ## Public Writable Callback Properties
 
-These properties can be reassigned after construction, typically right after you create the instance. Each must be an internal Convex mutation reference matching the `EventHandler` signature.
+These properties can be reassigned after construction, typically right after you create the instance. Each must be an internal Convex mutation reference matching the `EventHandler` signature: it accepts `{ event, scope }` and returns a `VoiceWebhookResponse` or `null`. Spread the exported `eventCallbackArgs` into the handler's `args` to declare them.
 
 <ResponseField name="incomingEventCallback" type="EventHandler">
   Catch-all callback invoked for every incoming webhook event that does not
@@ -91,6 +92,13 @@ import { agentphone } from "./agentphone.js";
 agentphone.incomingEventCallback = internal.agentphone.handleEvent;
 agentphone.callEndedCallback     = internal.calls.onCallEnded;
 ```
+
+<Note>
+  `scope` tells a callback which tenant the delivery belongs to: the client's own
+  scope, or a `<scope>:sub:<subAccountId>` scope when the delivery came from a
+  sub-account webhook. One handler can therefore serve every tenant a deployment
+  hosts.
+</Note>
 
 <Note>
   Voice callbacks run synchronously inside the event-insert transaction so their
@@ -256,6 +264,24 @@ All event history methods accept an optional `limit` and run from query, mutatio
 | `getUsageByNumber(ctx)` | Action | Usage statistics broken down by phone number. |
 | `getUsageByAgent(ctx, args?)` | Action | Usage statistics broken down by agent, with an optional period of `"week"`, `"month"`, or `"year"`. |
 
+### Sub-Accounts
+
+Master-account operations. Calling them on a client bound to a sub-account throws, because AgentPhone allows only one level of nesting. See the [Sub-Accounts reference](/api/sub-accounts).
+
+| Method | Context | Description |
+|--------|---------|-------------|
+| `forSubAccount(subAccount, options?)` | Setup | Derive a client bound to a sub-account and its own scope. |
+| `subAccountScope(subAccountId)` | Setup | The scope `forSubAccount` derives by default. |
+| `createSubAccount(ctx, args)` | Action | Create a sub-account, idempotently when given a tenant `key`. |
+| `updateSubAccount(ctx, args)` | Action | Rename a sub-account. |
+| `deleteSubAccount(ctx, args)` | Action | Delete a sub-account and drop its registry entry. |
+| `listSubAccounts(ctx, args?)` | Action | List sub-accounts as AgentPhone reports them. |
+| `syncSubAccounts(ctx, args?)` | Action | Reconcile the local registry with AgentPhone. |
+| `adoptSubAccount(ctx, args)` | Mutation / Action | Bind an existing sub-account to this scope and an optional key. |
+| `releaseSubAccountClaim(ctx, args)` | Mutation / Action | Drop an unfinished provisioning claim. |
+| `listLocalSubAccounts(ctx, args?)` | Query / Mutation / Action | Read the registry reactively. |
+| `getLocalSubAccount(ctx, args)` | Query / Mutation / Action | Look up one registry entry by `key` or `subAccountId`. |
+
 ### Escape Hatch
 
 | Method | Context | Description |
@@ -323,6 +349,8 @@ import {
   callRecordingValidator,
   webhookDeliveryValidator,
   outboundRequestValidator,
+  subAccountValidator,
+  eventCallbackArgs,
 } from "agentphone-convex";
 ```
 
@@ -340,6 +368,8 @@ import {
 | `callRecordingValidator` | Validator for a mirrored `AgentPhoneCallRecording` record. |
 | `webhookDeliveryValidator` | Validator for a `AgentPhoneWebhookDelivery` record. |
 | `outboundRequestValidator` | Validator for a `AgentPhoneOutboundRequest` record. |
+| `subAccountValidator` | Validator for an `AgentPhoneSubAccount` registry entry. |
+| `eventCallbackArgs` | Argument validators for a webhook callback: `{ event, scope }`. |
 
 ---
 
@@ -359,4 +389,6 @@ These TypeScript types are inferred from the validators above and re-exported fo
 | `AgentPhoneCallRecording` | A local mirror of a call recording. |
 | `AgentPhoneWebhookDelivery` | A webhook delivery record. |
 | `AgentPhoneOutboundRequest` | A durable outbound queue entry. |
-| `EventHandler` | The type for all callback properties — an internal Convex mutation reference that accepts `{ event: AgentPhoneEvent }` and returns `VoiceWebhookResponse \| null`. |
+| `AgentPhoneSubAccount` | A sub-account registry entry, including in-flight provisioning claims. |
+| `AgentPhoneProvisionedSubAccount` | A registry entry AgentPhone has already assigned an id to. |
+| `EventHandler` | The type for all callback properties — an internal Convex mutation reference that accepts `{ event: AgentPhoneEvent; scope: string }` and returns `VoiceWebhookResponse \| null`. |

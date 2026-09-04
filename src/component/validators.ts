@@ -29,6 +29,36 @@ export const outboundStatusValidator = v.union(
 );
 
 /**
+ * A sub-account registry entry is `provisioning` from the moment a create is
+ * claimed until AgentPhone returns an id, and `active` afterwards. The claim is
+ * what keeps one tenant key from provisioning two sub-accounts.
+ */
+export const subAccountStatusValidator = v.union(
+  v.literal("provisioning"),
+  v.literal("active"),
+);
+
+export const subAccountFields = {
+  scope: v.string(),
+  /** Caller-supplied tenant key. Unique within a scope when present. */
+  key: v.optional(v.string()),
+  /** AgentPhone sub-account id. Absent only while `status` is `provisioning`. */
+  subAccountId: v.optional(v.string()),
+  name: v.optional(v.string()),
+  status: subAccountStatusValidator,
+  payload: v.any(),
+  syncedAt: v.number(),
+  updatedAt: v.number(),
+};
+
+/** A registry entry AgentPhone has already assigned an id to. */
+export const provisionedSubAccountValidator = v.object({
+  ...subAccountFields,
+  subAccountId: v.string(),
+  status: v.literal("active"),
+});
+
+/**
  * AgentPhone may add event and channel values without a component release, so
  * those fields intentionally remain strings while the exported TypeScript
  * types describe today's known values.

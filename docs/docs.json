@@ -49,6 +49,7 @@
               "guides/voice-calls",
               "guides/webhooks",
               "guides/outbound-queue",
+              "guides/multi-tenant",
               "guides/sync-backfill",
               "guides/authorization",
               "guides/test-mode"
@@ -95,6 +96,12 @@
             "pages": [
               "api/agents",
               "api/numbers"
+            ]
+          },
+          {
+            "group": "Accounts",
+            "pages": [
+              "api/sub-accounts"
             ]
           }
         ]

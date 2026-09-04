@@ -324,10 +324,15 @@ const event = await agentphone.getEventByDeliveryId(ctx, {
 Import these validators to annotate your own Convex function return types.
 
 ```ts
-import { storedEventValidator, eventValidator } from "agentphone-convex";
+import {
+  storedEventValidator,
+  eventValidator,
+  eventCallbackArgs,
+} from "agentphone-convex";
 ```
 
 | Export | Validates |
 |---|---|
 | `storedEventValidator` | A `StoredEvent` as stored in the `events` table |
 | `eventValidator` | An `AgentPhoneEvent` as received in a webhook callback |
+| `eventCallbackArgs` | Both arguments a webhook callback receives: `{ event, scope }` |

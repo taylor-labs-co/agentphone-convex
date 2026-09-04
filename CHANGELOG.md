@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.4.0
+
+### Breaking
+
+- Webhook callbacks now receive `{ event, scope }` instead of `{ event }`, so a
+  handler can tell which tenant a delivery belongs to. Update each callback's
+  argument validators — spreading the new `eventCallbackArgs` export keeps them
+  correct through future additions:
+
+  ```diff
+  - args: { event: eventValidator },
+  + args: eventCallbackArgs,
+  ```
+
+### Added
+
+- Sub-account support for multi-tenant apps: `createSubAccount`,
+  `updateSubAccount`, `deleteSubAccount`, `listSubAccounts`, `syncSubAccounts`,
+  `adoptSubAccount`, `releaseSubAccountClaim`, `listLocalSubAccounts`, and
+  `getLocalSubAccount`.
+- `forSubAccount(subAccount, options?)` derives a client bound to a sub-account
+  and to a `<scope>:sub:<subAccountId>` component scope, and `subAccountScope`
+  exposes that scope. Agent and number defaults are not inherited, because they
+  name resources the sub-account cannot see.
+- A `subAccounts` registry table that makes provisioning idempotent per tenant
+  key: the key is claimed in a transaction before AgentPhone is called, claims
+  are released when AgentPhone definitively rejects the create, and unresolved
+  claims are reported for explicit recovery instead of risking a duplicate.
+- Sub-account management methods throw on a client bound to a sub-account,
+  matching AgentPhone's single level of nesting.
+- The webhook route accepts any scope derived from the client it was registered
+  on, including sub-account and nested agent scopes.
+
 ## 0.3.0
 
 - Merge the typed AgentPhone API core with the existing reactive component.

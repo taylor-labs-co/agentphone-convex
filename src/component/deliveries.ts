@@ -19,9 +19,14 @@ import {
 
 type WebhookEvent = Infer<typeof agentPhoneEventValidator>;
 type CallbackResult = Infer<typeof voiceWebhookResponseValidator> | null;
+/**
+ * Callbacks receive the scope the delivery arrived on so one handler can serve
+ * every tenant a deployment hosts.
+ */
+type CallbackArgs = { event: WebhookEvent; scope: string };
 
 export const eventCallbackValidator = v.string() as VString<
-  FunctionHandle<"mutation", { event: WebhookEvent }, CallbackResult>
+  FunctionHandle<"mutation", CallbackArgs, CallbackResult>
 >;
 
 export async function recordDelivery(
@@ -31,11 +36,7 @@ export async function recordDelivery(
     deliveryId: string;
     eventId: Id<"events">;
     event: WebhookEvent;
-    callback?: FunctionHandle<
-      "mutation",
-      { event: WebhookEvent },
-      CallbackResult
-    >;
+    callback?: FunctionHandle<"mutation", CallbackArgs, CallbackResult>;
   },
 ) {
   const receivedAt = Date.now();
@@ -65,7 +66,10 @@ export async function recordDelivery(
   }
   if (synchronous) {
     const result =
-      (await ctx.runMutation(args.callback, { event: args.event })) ?? null;
+      (await ctx.runMutation(args.callback, {
+        event: args.event,
+        scope: args.scope,
+      })) ?? null;
     await ctx.db.patch("webhookDeliveries", deliveryDocId, {
       status: "dispatched",
       lastAttemptAt: Date.now(),
@@ -93,7 +97,10 @@ export const dispatchCallback = internalAction({
     }
 
     try {
-      await ctx.runMutation(claimed.callback, { event: claimed.event });
+      await ctx.runMutation(claimed.callback, {
+        event: claimed.event,
+        scope: claimed.scope,
+      });
       await ctx.runMutation(internal.deliveries.markDispatched, args);
     } catch (error) {
       const shouldRetry = claimed.attempt < claimed.maxAttempts;
@@ -122,6 +129,7 @@ export const claimForDispatch = internalMutation({
     v.object({
       callback: eventCallbackValidator,
       event: agentPhoneEventValidator,
+      scope: v.string(),
       attempt: v.number(),
       maxAttempts: v.number(),
     }),
@@ -153,10 +161,11 @@ export const claimForDispatch = internalMutation({
     return {
       callback: delivery.callback as FunctionHandle<
         "mutation",
-        { event: WebhookEvent },
+        CallbackArgs,
         CallbackResult
       >,
       event: event.payload as WebhookEvent,
+      scope: delivery.scope,
       attempt,
       maxAttempts: delivery.maxAttempts,
     };

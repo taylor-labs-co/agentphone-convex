@@ -10,6 +10,8 @@ client with Convex-native state and operations:
   and call transcripts.
 - A durable outbound queue with idempotency, retries, cancellation, status
   queries, and a provider-free test mode.
+- Sub-account provisioning for multi-tenant apps: one tenant, one AgentPhone
+  sub-account, one Convex scope.
 - Signed, replay-protected, deduplicated webhooks with synchronous voice
   responses and retryable asynchronous callbacks.
 - Indexed event history and webhook delivery diagnostics.
@@ -122,16 +124,18 @@ alias. Use `configureAgentWebhook(ctx, { agentId })` for an agent override, or
 `configureAgentWebhook` uses, so agent deliveries verify against it.
 
 Passing `AGENTPHONE_WEBHOOK_SECRET` directly to the client binds that webhook
-route to the client's configured scope and the agent scopes derived from it;
+route to the client's configured scope and the scopes derived from it;
 requests naming another scope receive a `403` response. To serve multiple scopes
-from one route, omit the global override and store a separate secret for every
-scope with `configureWebhook` or `setWebhookSecret`.
+from one route — which is what a multi-tenant deployment needs — omit the global
+override and store a separate secret for every scope with `configureWebhook` or
+`setWebhookSecret`.
 
-Callbacks are internal mutations:
+Callbacks are internal mutations. They receive the event and the scope it
+arrived on, so one handler can serve every scope a deployment hosts:
 
 ```ts
 import { v } from "convex/values";
-import { eventValidator, voiceResponseValidator } from "agentphone-convex";
+import { eventCallbackArgs, voiceResponseValidator } from "agentphone-convex";
 import { internal } from "./_generated/api.js";
 import { internalMutation } from "./_generated/server.js";
 import { agentphone } from "./agentphone.js";
@@ -139,9 +143,9 @@ import { agentphone } from "./agentphone.js";
 agentphone.incomingEventCallback = internal.agentphone.handleEvent;
 
 export const handleEvent = internalMutation({
-  args: { event: eventValidator },
+  args: eventCallbackArgs,
   returns: v.union(voiceResponseValidator, v.null()),
-  handler: async (_ctx, { event }) => {
+  handler: async (_ctx, { event, scope }) => {
     if (event.event === "agent.message" && event.channel === "voice") {
       return { text: "Let me check that for you." };
     }
@@ -229,6 +233,44 @@ resent or left stuck in `sending`.
 Set `testMode: true` on a direct or queued request—or on the client—to exercise
 the component without an API key or provider call.
 
+## Multi-tenant sub-accounts
+
+An AgentPhone sub-account isolates a tenant's agents, numbers, conversations,
+calls, and webhooks under one master account and API key. `forSubAccount`
+derives a client bound to that sub-account and to its own component scope, so
+the AgentPhone and Convex isolation boundaries always agree:
+
+```ts
+export const provisionTenant = internalAction({
+  args: { tenantId: v.id("tenants"), name: v.string() },
+  returns: v.any(),
+  handler: async (ctx, args) => {
+    const subAccount = await agentphone.createSubAccount(ctx, {
+      name: args.name,
+      key: args.tenantId, // one sub-account per tenant, however often this runs
+    });
+
+    const tenant = agentphone.forSubAccount(subAccount);
+    await tenant.configureWebhook(ctx, { contextLimit: 10 });
+    return await tenant.provisionNumber(ctx, { country: "US" });
+  },
+});
+```
+
+`key` makes provisioning idempotent: the component claims the key in a
+transaction before calling AgentPhone, so concurrent signups and retried actions
+return the sub-account that already belongs to that tenant. When an attempt ends
+with an unknown outcome, the claim is kept and later calls fail loudly rather
+than create a second sub-account; `syncSubAccounts`, `adoptSubAccount`, and
+`releaseSubAccountClaim` resolve it explicitly.
+
+Derived clients store their records under `<scope>:sub:<subAccountId>`. Keep
+`registerRoutes` on the master client: the one webhook route resolves each
+delivery's scope from its URL and verifies it against that scope's secret.
+Sub-account management stays on the master client too, matching AgentPhone's
+single level of nesting. Read the registry with `listLocalSubAccounts` and
+`getLocalSubAccount`.
+
 ## Reactive resource mirrors
 
 Webhooks, direct sends/calls, queued work, transcript fetches, and explicit
@@ -266,8 +308,8 @@ All reads are index-backed, default to 50 records, and reject limits above 100.
 
 ## Sync and backfill
 
-Use `syncAgents`, `syncNumbers`, `syncConversations`, `syncMessages`, and
-`syncCalls` from actions. Each helper fetches one bounded provider page,
+Use `syncSubAccounts`, `syncAgents`, `syncNumbers`, `syncConversations`,
+`syncMessages`, and `syncCalls` from actions. Each helper fetches one bounded provider page,
 normalizes it into the component, and returns `{ synced, response }`.
 
 ```ts
@@ -291,8 +333,8 @@ The immutable event log is separate from the latest-state resource mirrors. Use
 
 The client includes helpers for agents, voices, agent calls/conversations,
 numbers, number messages/calls, conversations, typing indicators, messages,
-reactions, calls, transcripts, recordings, usage breakdowns, project and agent
-webhooks, and provider delivery statistics.
+reactions, calls, transcripts, recordings, usage breakdowns, sub-accounts,
+project and agent webhooks, and provider delivery statistics.
 
 For a new or less common JSON endpoint:
 

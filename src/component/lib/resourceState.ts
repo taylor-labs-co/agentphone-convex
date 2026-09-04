@@ -27,6 +27,8 @@ export function extractAgentPhoneRecords(response: unknown): UnknownRecord[] {
     "conversations",
     "messages",
     "calls",
+    "subAccounts",
+    "sub_accounts",
   ]) {
     const value = record[key];
     if (Array.isArray(value)) {
