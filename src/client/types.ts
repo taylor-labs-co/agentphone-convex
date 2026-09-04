@@ -325,6 +325,20 @@ export interface ConversationListResponse {
   total?: number;
 }
 
+export interface SubAccount {
+  id: string;
+  name: string;
+  createdAt?: string;
+  [key: string]: JsonValue | undefined;
+}
+
+export interface SubAccountListResponse {
+  data?: SubAccount[];
+  subAccounts?: SubAccount[];
+  sub_accounts?: SubAccount[];
+  total?: number;
+}
+
 export interface UsageResponse {
   plan: JsonValue;
   numbers: JsonValue;

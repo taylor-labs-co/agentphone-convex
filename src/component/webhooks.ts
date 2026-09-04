@@ -38,7 +38,11 @@ type InsertWebhookResult = {
   callbackResult: CallbackResult;
 };
 const eventCallbackValidator = v.string() as VString<
-  FunctionHandle<"mutation", { event: WebhookEvent }, CallbackResult>
+  FunctionHandle<
+    "mutation",
+    { event: WebhookEvent; scope: string },
+    CallbackResult
+  >
 >;
 
 const configFields = {

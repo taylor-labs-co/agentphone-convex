@@ -5,6 +5,7 @@ import {
   outboundKindValidator,
   outboundStatusValidator,
   sourceValidator,
+  subAccountFields,
 } from "./validators.js";
 
 export default defineSchema({
@@ -69,6 +70,15 @@ export default defineSchema({
     createdAt: v.optional(v.string()),
     updatedAt: v.number(),
   }).index("by_scope", ["scope"]),
+
+  /**
+   * Registry of the AgentPhone sub-accounts a master scope owns. Unlike the
+   * mirrors below it is also the provisioning ledger: a row is claimed before
+   * the create request so one tenant key can only ever own one sub-account.
+   */
+  subAccounts: defineTable(subAccountFields)
+    .index("by_scope_and_sub_account_id", ["scope", "subAccountId"])
+    .index("by_scope_and_key", ["scope", "key"]),
 
   agents: defineTable({
     scope: v.string(),

@@ -125,6 +125,41 @@ describe("AgentPhone.registerRoutes webhook scope binding", () => {
     );
   });
 
+  test("accepts sub-account scopes derived from the configured scope", async () => {
+    const handler = registerWebhookRoute({
+      scope: "tenant-alpha",
+      secretOverride: "global-secret",
+    });
+    const ctx = actionContext();
+
+    for (const scope of [
+      "tenant-alpha:sub:sub_123",
+      "tenant-alpha:sub:sub_123:agent:agt_123",
+    ]) {
+      const response = await handler._handler(ctx, webhookRequest(scope));
+      expect(response.status).toBe(200);
+      expect(ctx.runAction).toHaveBeenCalledWith(
+        "webhooks:handle",
+        expect.objectContaining({ scope }),
+      );
+    }
+  });
+
+  test("accepts its own scope when the client is bound to a sub-account", async () => {
+    const handler = registerWebhookRoute({
+      scope: "tenant-alpha:sub:sub_123",
+      secretOverride: "global-secret",
+    });
+    const ctx = actionContext();
+
+    const response = await handler._handler(
+      ctx,
+      webhookRequest("tenant-alpha:sub:sub_123"),
+    );
+
+    expect(response.status).toBe(200);
+  });
+
   test("rejects agent scopes belonging to another tenant", async () => {
     const handler = registerWebhookRoute({
       scope: "tenant-alpha",
@@ -136,6 +171,8 @@ describe("AgentPhone.registerRoutes webhook scope binding", () => {
       "tenant-bravo:agent:agt_123",
       "tenant-alpha-two",
       "tenant-alpha:agent:",
+      "tenant-bravo:sub:sub_123",
+      "tenant-alpha:sub:",
     ]) {
       const response = await handler._handler(ctx, webhookRequest(scope));
       expect(response.status).toBe(403);

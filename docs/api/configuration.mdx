@@ -32,9 +32,13 @@ export const agentphone = new AgentPhone(components.agentphone, {
 
 <ParamField body="subAccountId" type="string">
   Sub-account to use for all API calls made through this client. When set,
-  it is automatically forwarded on every request. Individual methods also
-  accept a `subAccountId` override to target a different sub-account for a
-  single call.
+  it is automatically forwarded on every request, and sub-account management
+  methods throw because AgentPhone allows only one level of nesting.
+
+  Prefer [`forSubAccount`](/api/sub-accounts) over setting this by hand: it
+  derives the matching scope as well, so the Convex and AgentPhone isolation
+  boundaries cannot drift apart. Set it directly only when a client should be
+  permanently pinned to one sub-account.
 </ParamField>
 
 ---
@@ -80,13 +84,20 @@ export const agentphone = new AgentPhone(components.agentphone, {
 
   <Note>
     When you pass `AGENTPHONE_WEBHOOK_SECRET`, the webhook route is bound to
-    this client's configured `scope` and the agent sub-scopes that
-    `configureAgentWebhook` derives from it. Any delivery whose `?scope=`
+    this client's configured `scope` and the scopes derived from it by
+    `configureAgentWebhook` and `forSubAccount`. Any delivery whose `?scope=`
     query parameter names a different scope receives a `403` response.
     To serve multiple independent scopes from a single route, **omit** this
     option and instead store a dedicated secret for each scope by calling
     `configureWebhook` or `setWebhookSecret` for each one separately.
   </Note>
+
+  <Warning>
+    Multi-tenant deployments should omit this option. One shared secret verifies
+    every derived scope, so it cannot distinguish one tenant's deliveries from
+    another's. `configureWebhook` on a client returned by `forSubAccount` stores
+    a separate AgentPhone secret per tenant, which is what keeps them apart.
+  </Warning>
 </ParamField>
 
 ---

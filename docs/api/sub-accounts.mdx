@@ -1,0 +1,272 @@
+---
+title: "Sub-Accounts API — Provision and Operate Tenant Accounts"
+sidebarTitle: "Sub-Accounts"
+description: "Create AgentPhone sub-accounts idempotently, derive tenant-bound clients with forSubAccount, and keep the Convex registry of tenant sub-accounts in sync."
+---
+
+An AgentPhone sub-account is a fully isolated account under one master account: its own agents, numbers, conversations, calls, webhooks, and 10DLC registration, billed to the master's wallet and reachable with the master API key. That makes one sub-account per tenant the natural shape for a multi-tenant SaaS. The [multi-tenant guide](/guides/multi-tenant) walks through the whole flow; this page is the reference.
+
+The component keeps a **registry** of the sub-accounts a master scope owns. The registry is what makes provisioning idempotent, gives you a reactive list of tenant accounts, and lets a tenant key resolve to a sub-account ID without a round trip to AgentPhone.
+
+<Note>
+  Every method on this page is a master-account operation. Calling one on a client
+  returned by `forSubAccount` throws, because AgentPhone allows only one level of
+  nesting.
+</Note>
+
+---
+
+## `forSubAccount`
+
+Derives a client bound to one sub-account. Every AgentPhone call it makes carries that sub-account, and every record it stores lives under its own scope.
+
+```ts
+const tenant = agentphone.forSubAccount(subAccountId);
+
+await tenant.provisionNumber(ctx, { country: "US" });
+await tenant.sendMessage(ctx, { toNumber, body, numberId });
+```
+
+**Parameters**
+
+<ParamField body="subAccount" type="string | { subAccountId: string }" required>
+  A sub-account ID, or any registry entry that carries one.
+</ParamField>
+
+<ParamField body="options.scope" type="string" default="`<scope>:sub:<subAccountId>`">
+  Convex scope for the derived client. The default derives from the master
+  client's scope, so the webhook route accepts it and tenant data stays
+  partitioned without any bookkeeping on your side.
+</ParamField>
+
+<ParamField body="options.defaultAgentId" type="string">
+  Default agent for the tenant. Master defaults are deliberately not inherited:
+  they name resources in the master account, which the sub-account cannot see.
+</ParamField>
+
+<ParamField body="options.defaultNumberId" type="string">
+  Default number for the tenant.
+</ParamField>
+
+<ParamField body="options.testMode" type="boolean">
+  Override the master client's test mode for this tenant.
+</ParamField>
+
+**Returns** a new `AgentPhone` client.
+
+<Warning>
+  Register HTTP routes once, on the master client. The single webhook route reads
+  each delivery's scope from its URL, and the component verifies it against the
+  secret stored for that scope.
+</Warning>
+
+---
+
+## `createSubAccount`
+
+Creates a sub-account at AgentPhone and records it in the registry.
+
+```ts
+const subAccount = await agentphone.createSubAccount(ctx, {
+  name: tenant.name,
+  key: tenant._id, // makes the call idempotent for this tenant
+});
+```
+
+**Parameters**
+
+<ParamField body="ctx" type="ActionCtx" required>
+  A Convex action context.
+</ParamField>
+
+<ParamField body="name" type="string" required>
+  Display name, 1–100 characters.
+</ParamField>
+
+<ParamField body="key" type="string">
+  Your tenant or workspace ID. When present, the component claims the key in a
+  transaction before calling AgentPhone, so concurrent signups and retried
+  actions return the sub-account that already belongs to that key instead of
+  creating a second one. Without a key, every call creates a new sub-account.
+</ParamField>
+
+**Returns** `AgentPhoneProvisionedSubAccount`
+
+<ResponseField name="subAccountId" type="string">
+  The AgentPhone sub-account ID. Pass it to `forSubAccount`.
+</ResponseField>
+
+<ResponseField name="key" type="string | undefined">
+  The tenant key this sub-account is claimed by.
+</ResponseField>
+
+<ResponseField name="name" type="string | undefined">
+  Display name as AgentPhone reported it.
+</ResponseField>
+
+<ResponseField name="status" type='"active"'>
+  Registry status. `create` only ever returns `"active"` entries.
+</ResponseField>
+
+<ResponseField name="payload" type="unknown">
+  The raw AgentPhone response.
+</ResponseField>
+
+### When provisioning cannot be settled safely
+
+A claim is released automatically when AgentPhone definitively rejects the request (`4xx`), so the key is free to try again. Timeouts, throttling, and `5xx` responses leave the outcome unknown: the claim is marked `unresolved` and later calls throw rather than risk a second sub-account for one tenant. Recover explicitly:
+
+```ts
+await agentphone.syncSubAccounts(ctx);            // what does AgentPhone actually hold?
+await agentphone.adoptSubAccount(ctx, {           // it created one — bind it
+  key: tenantId,
+  subAccountId: "sub_123",
+});
+await agentphone.releaseSubAccountClaim(ctx, {    // it did not — free the key
+  key: tenantId,
+});
+```
+
+---
+
+## `updateSubAccount`
+
+Renames a sub-account and updates its registry entry.
+
+```ts
+await agentphone.updateSubAccount(ctx, {
+  subAccountId: "sub_123",
+  name: "Acme Corp",
+});
+```
+
+**Returns** `AgentPhoneProvisionedSubAccount`
+
+---
+
+## `deleteSubAccount`
+
+Deletes the sub-account at AgentPhone and drops its registry entry.
+
+```ts
+await agentphone.deleteSubAccount(ctx, { subAccountId: "sub_123" });
+```
+
+<Note>
+  Records the component already mirrored under the tenant's own scope — events,
+  conversations, deliveries — are left in place. Delete them from your app when
+  your retention policy says so.
+</Note>
+
+---
+
+## `listSubAccounts`
+
+Lists sub-accounts as AgentPhone reports them, without touching the registry.
+
+```ts
+const response = await agentphone.listSubAccounts(ctx, { limit: 100 });
+const subAccounts = response.data ?? response.subAccounts ?? [];
+```
+
+<ParamField body="limit" type="number">1–500 results.</ParamField>
+<ParamField body="offset" type="number">Records to skip.</ParamField>
+<ParamField body="statsDays" type="number">Include usage statistics for the last 1–90 days.</ParamField>
+
+---
+
+## `syncSubAccounts`
+
+Lists sub-accounts and merges them into the registry, keeping any tenant keys already bound to them.
+
+```ts
+const { synced } = await agentphone.syncSubAccounts(ctx, { limit: 100 });
+```
+
+**Returns** `{ synced: number; response: unknown }`
+
+---
+
+## `adoptSubAccount`
+
+Binds a sub-account AgentPhone already holds to this scope, optionally under a tenant key. Use it to onboard sub-accounts created before this component, or to resolve a claim that never settled.
+
+```ts
+await agentphone.adoptSubAccount(ctx, {
+  subAccountId: "sub_123",
+  key: tenantId,
+  name: "Acme",
+});
+```
+
+Runs from a mutation or an action. **Returns** `AgentPhoneProvisionedSubAccount`.
+
+<Warning>
+  A key names at most one sub-account and a sub-account belongs to at most one
+  key. Adopting across an existing binding — a key that already names another
+  sub-account, or a sub-account that already belongs to another key — throws
+  instead of moving it, since silently reassigning would leave the displaced
+  tenant unmapped and free to provision a second provider account. Delete the
+  sub-account, or release the claim, before rebinding.
+</Warning>
+
+---
+
+## `releaseSubAccountClaim`
+
+Drops an unsettled provisioning claim so its key can be provisioned again. Returns `false` when the key has no claim, or already names a sub-account — active entries are only removed by `deleteSubAccount`.
+
+```ts
+const released = await agentphone.releaseSubAccountClaim(ctx, { key: tenantId });
+```
+
+<Note>
+  A `provisioning` claim is leased for five minutes and cannot be released while
+  the lease holds, because the `createSubAccount` call that took it may still be
+  waiting on AgentPhone. After the lease lapses, the first release demotes the
+  claim to `unresolved` and returns `false` so a late AgentPhone response can
+  still finish against it. That lease-demoted claim stays reserved until the
+  originating create's action budget has elapsed — freeing it earlier would let
+  a replacement create race a still-possible provider response. Claims that a
+  create explicitly could not settle are marked `unresolved` and are releasable
+  right away.
+</Note>
+
+---
+
+## `listLocalSubAccounts` and `getLocalSubAccount`
+
+Reactive reads of the registry. They run from a query, mutation, or action and never call AgentPhone.
+
+```ts
+export const tenants = query({
+  args: {},
+  returns: v.array(subAccountValidator),
+  handler: async (ctx) => {
+    await requireAgentPhoneScopeAccess(ctx, { scope: agentphone.scope });
+    return await agentphone.listLocalSubAccounts(ctx, { limit: 100 });
+  },
+});
+
+const entry = await agentphone.getLocalSubAccount(ctx, { key: tenantId });
+```
+
+`getLocalSubAccount` takes exactly one of `key` or `subAccountId`.
+
+**Returns** `AgentPhoneSubAccount` entries:
+
+<ResponseField name="status" type='"provisioning" | "unresolved" | "active"'>
+  `"provisioning"` is a claim a create still holds, `"unresolved"` is one whose
+  create ended without learning whether AgentPhone made the sub-account, and
+  `"active"` is a provisioned sub-account. Only `"active"` entries carry a
+  `subAccountId`.
+</ResponseField>
+
+<ResponseField name="error" type="string | undefined">
+  Why an `"unresolved"` claim could not be settled.
+</ResponseField>
+
+<ResponseField name="updatedAt" type="number">
+  When the entry last changed. For a `"provisioning"` entry this is when the
+  claim was taken, and it is what the five-minute lease is measured against.
+</ResponseField>

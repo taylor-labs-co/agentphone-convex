@@ -905,6 +905,124 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         Name
       >;
     };
+    subAccounts: {
+      adopt: FunctionReference<
+        "mutation",
+        "internal",
+        { key?: string; name?: string; scope: string; subAccountId: string },
+        {
+          error?: string;
+          key?: string;
+          name?: string;
+          payload: any;
+          scope: string;
+          status: "active";
+          subAccountId: string;
+          syncedAt: number;
+          updatedAt: number;
+        },
+        Name
+      >;
+      create: FunctionReference<
+        "action",
+        "internal",
+        {
+          baseUrl?: string;
+          key?: string;
+          name: string;
+          scope: string;
+          token: string;
+        },
+        {
+          error?: string;
+          key?: string;
+          name?: string;
+          payload: any;
+          scope: string;
+          status: "active";
+          subAccountId: string;
+          syncedAt: number;
+          updatedAt: number;
+        },
+        Name
+      >;
+      get: FunctionReference<
+        "query",
+        "internal",
+        { key?: string; scope: string; subAccountId?: string },
+        {
+          error?: string;
+          key?: string;
+          name?: string;
+          payload: any;
+          scope: string;
+          status: "provisioning" | "unresolved" | "active";
+          subAccountId?: string;
+          syncedAt: number;
+          updatedAt: number;
+        } | null,
+        Name
+      >;
+      list: FunctionReference<
+        "query",
+        "internal",
+        { limit?: number; scope: string },
+        Array<{
+          error?: string;
+          key?: string;
+          name?: string;
+          payload: any;
+          scope: string;
+          status: "provisioning" | "unresolved" | "active";
+          subAccountId?: string;
+          syncedAt: number;
+          updatedAt: number;
+        }>,
+        Name
+      >;
+      releaseClaimByKey: FunctionReference<
+        "mutation",
+        "internal",
+        { key: string; scope: string },
+        boolean,
+        Name
+      >;
+      remove: FunctionReference<
+        "action",
+        "internal",
+        {
+          baseUrl?: string;
+          scope: string;
+          subAccountId: string;
+          token: string;
+        },
+        null,
+        Name
+      >;
+      update: FunctionReference<
+        "action",
+        "internal",
+        {
+          baseUrl?: string;
+          name: string;
+          scope: string;
+          subAccountId: string;
+          token: string;
+        },
+        {
+          error?: string;
+          key?: string;
+          name?: string;
+          payload: any;
+          scope: string;
+          status: "active";
+          subAccountId: string;
+          syncedAt: number;
+          updatedAt: number;
+        },
+        Name
+      >;
+    };
     sync: {
       agents: FunctionReference<
         "action",
@@ -981,6 +1099,19 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           offset?: number;
           scope: string;
           subAccountId?: string;
+          token: string;
+        },
+        { response: any; synced: number },
+        Name
+      >;
+      subAccounts: FunctionReference<
+        "action",
+        "internal",
+        {
+          baseUrl?: string;
+          limit?: number;
+          offset?: number;
+          scope: string;
           token: string;
         },
         { response: any; synced: number },

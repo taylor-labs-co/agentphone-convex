@@ -8,7 +8,7 @@ import {
   httpActionGeneric,
   type HttpRouter,
 } from "convex/server";
-import type { Infer } from "convex/values";
+import { v, type Infer } from "convex/values";
 import type { ComponentApi } from "../component/_generated/component.js";
 import type { Id } from "../component/_generated/dataModel.js";
 import schema from "../component/schema.js";
@@ -39,6 +39,7 @@ import type {
   SendMessageResult,
   SendStyle,
   StoredEvent,
+  SubAccountListResponse,
   SyncPageArgs,
   SyncResult,
   TestModeResult,
@@ -66,6 +67,16 @@ export const webhookDeliveryValidator =
   schema.tables.webhookDeliveries.validator;
 export const outboundRequestValidator =
   schema.tables.outboundRequests.validator;
+export const subAccountValidator = schema.tables.subAccounts.validator;
+
+/**
+ * Argument validators for a webhook callback. Spread them into the callback's
+ * `args` so it keeps accepting everything the component dispatches.
+ */
+export const eventCallbackArgs = {
+  event: agentPhoneEventValidator,
+  scope: v.string(),
+};
 
 export type Event = Infer<typeof eventValidator>;
 export type AgentPhoneAgent = Infer<typeof agentValidator>;
@@ -80,10 +91,16 @@ export type AgentPhoneWebhookDelivery = Omit<
   "eventId"
 > & { eventId: string };
 export type AgentPhoneOutboundRequest = Infer<typeof outboundRequestValidator>;
+export type AgentPhoneSubAccount = Infer<typeof subAccountValidator>;
+/** A sub-account AgentPhone has already assigned an id to. */
+export type AgentPhoneProvisionedSubAccount = Omit<
+  AgentPhoneSubAccount,
+  "subAccountId" | "status"
+> & { subAccountId: string; status: "active" };
 export type EventHandler = FunctionReference<
   "mutation",
   "internal",
-  { event: AgentPhoneEvent },
+  { event: AgentPhoneEvent; scope: string },
   VoiceWebhookResponse | null
 >;
 
@@ -115,6 +132,7 @@ export class AgentPhone {
   public reactionCallback?: EventHandler;
   public callEndedCallback?: EventHandler;
 
+  private readonly options: AgentPhoneOptions;
   private readonly apiKeyOverride?: string;
   private readonly webhookSecretOverride?: string;
   private readonly apiBaseUrl?: string;
@@ -125,6 +143,7 @@ export class AgentPhone {
     public readonly componentApi: ComponentApi,
     options: AgentPhoneOptions = {},
   ) {
+    this.options = { ...options };
     this.apiKeyOverride = options.AGENTPHONE_API_KEY;
     this.webhookSecretOverride = options.AGENTPHONE_WEBHOOK_SECRET;
     this.apiBaseUrl = options.apiBaseUrl;
@@ -271,6 +290,197 @@ export class AgentPhone {
       agentId: args.agentId,
       subAccountId: this.subAccountId,
       baseUrl: this.apiBaseUrl,
+    });
+  }
+
+  // Sub-accounts --------------------------------------------------------------
+
+  /**
+   * Derive a client bound to one AgentPhone sub-account. Every AgentPhone call
+   * it makes carries that sub-account, and its Convex records live under a
+   * scope derived from this client's scope, so tenants never share mirrors,
+   * webhook secrets, event history, or queue idempotency keys.
+   *
+   * Agent and number defaults are not inherited: they name resources in the
+   * master account, which a sub-account cannot see. Pass the tenant's own
+   * defaults instead. Keep `registerRoutes` on the master client; the single
+   * webhook route resolves each delivery's scope from its URL.
+   */
+  forSubAccount(
+    subAccount: string | { subAccountId: string },
+    options: {
+      scope?: string;
+      defaultAgentId?: string;
+      defaultNumberId?: string;
+      testMode?: boolean;
+    } = {},
+  ): AgentPhone {
+    this.assertMasterAccount("forSubAccount");
+    const subAccountId =
+      typeof subAccount === "string" ? subAccount : subAccount.subAccountId;
+    if (!subAccountId) {
+      throw new Error("forSubAccount requires a sub-account id");
+    }
+    return new AgentPhone(this.componentApi, {
+      ...this.options,
+      AGENTPHONE_WEBHOOK_SECRET: undefined,
+      scope: options.scope ?? this.subAccountScope(subAccountId),
+      subAccountId,
+      defaultAgentId: options.defaultAgentId,
+      defaultNumberId: options.defaultNumberId,
+      ...(options.testMode !== undefined && { testMode: options.testMode }),
+      incomingEventCallback: this.incomingEventCallback,
+      incomingMessageCallback: this.incomingMessageCallback,
+      reactionCallback: this.reactionCallback,
+      callEndedCallback: this.callEndedCallback,
+    });
+  }
+
+  /** The scope `forSubAccount` binds a sub-account to by default. */
+  subAccountScope(subAccountId: string) {
+    return `${this.scope}:sub:${subAccountId}`;
+  }
+
+  /**
+   * Create a sub-account under the master account.
+   *
+   * Pass `key` — a tenant or workspace ID — to make provisioning idempotent:
+   * the component claims the key in a transaction before calling AgentPhone, so
+   * concurrent signups and retried actions return the sub-account that already
+   * belongs to that key instead of creating a second one.
+   */
+  async createSubAccount(
+    ctx: ActionCtx,
+    args: { name: string; key?: string },
+  ): Promise<AgentPhoneProvisionedSubAccount> {
+    this.assertMasterAccount("createSubAccount");
+    return await ctx.runAction(this.componentApi.subAccounts.create, {
+      token: this.apiKey,
+      scope: this.scope,
+      name: args.name,
+      key: args.key,
+      baseUrl: this.apiBaseUrl,
+    });
+  }
+
+  /** Rename a sub-account and update its registry entry. */
+  async updateSubAccount(
+    ctx: ActionCtx,
+    args: { subAccountId: string; name: string },
+  ): Promise<AgentPhoneProvisionedSubAccount> {
+    this.assertMasterAccount("updateSubAccount");
+    return await ctx.runAction(this.componentApi.subAccounts.update, {
+      token: this.apiKey,
+      scope: this.scope,
+      subAccountId: args.subAccountId,
+      name: args.name,
+      baseUrl: this.apiBaseUrl,
+    });
+  }
+
+  /**
+   * Delete a sub-account at AgentPhone and drop its registry entry. Records
+   * already mirrored under the sub-account's own scope are left in place.
+   */
+  async deleteSubAccount(ctx: ActionCtx, args: { subAccountId: string }) {
+    this.assertMasterAccount("deleteSubAccount");
+    return await ctx.runAction(this.componentApi.subAccounts.remove, {
+      token: this.apiKey,
+      scope: this.scope,
+      subAccountId: args.subAccountId,
+      baseUrl: this.apiBaseUrl,
+    });
+  }
+
+  /** List sub-accounts as AgentPhone reports them. */
+  async listSubAccounts(
+    ctx: ActionCtx,
+    args: { limit?: number; offset?: number; statsDays?: number } = {},
+  ) {
+    this.assertMasterAccount("listSubAccounts");
+    return await this.request<SubAccountListResponse>(ctx, {
+      method: "GET",
+      path: "sub-accounts",
+      query: compactQuery({
+        limit: args.limit,
+        offset: args.offset,
+        stats_days: args.statsDays,
+      }),
+    });
+  }
+
+  /** Reconcile the local sub-account registry with AgentPhone. */
+  async syncSubAccounts(
+    ctx: ActionCtx,
+    args: SyncPageArgs = {},
+  ): Promise<SyncResult> {
+    this.assertMasterAccount("syncSubAccounts");
+    return await ctx.runAction(this.componentApi.sync.subAccounts, {
+      token: this.apiKey,
+      scope: this.scope,
+      baseUrl: this.apiBaseUrl,
+      ...args,
+    });
+  }
+
+  /**
+   * Bind a sub-account AgentPhone already holds to this scope, optionally under
+   * a tenant key. Use it to onboard sub-accounts created before this component
+   * or to resolve a provisioning claim that never settled.
+   *
+   * Throws rather than reassigning an existing binding: a key that already
+   * names another sub-account, or a sub-account that already belongs to another
+   * key, has to be deleted or released first.
+   */
+  async adoptSubAccount(
+    ctx: MutationCtx | ActionCtx,
+    args: { subAccountId: string; key?: string; name?: string },
+  ): Promise<AgentPhoneProvisionedSubAccount> {
+    this.assertMasterAccount("adoptSubAccount");
+    return await ctx.runMutation(this.componentApi.subAccounts.adopt, {
+      scope: this.scope,
+      ...args,
+    });
+  }
+
+  /**
+   * Drop an unsettled provisioning claim so its key can be provisioned again.
+   * Returns false when the key has no claim or already names a sub-account.
+   * Throws while a claim is still live. An expired provisioning claim is
+   * demoted to unresolved on the first release (returns false) so a late
+   * create can still finish, and stays reserved until that create's action
+   * budget has elapsed. Claims a create itself marked unresolved are
+   * releasable immediately.
+   */
+  async releaseSubAccountClaim(
+    ctx: MutationCtx | ActionCtx,
+    args: { key: string },
+  ): Promise<boolean> {
+    this.assertMasterAccount("releaseSubAccountClaim");
+    return await ctx.runMutation(
+      this.componentApi.subAccounts.releaseClaimByKey,
+      { scope: this.scope, key: args.key },
+    );
+  }
+
+  /** Read the sub-account registry reactively. */
+  async listLocalSubAccounts(
+    ctx: QueryCtx | MutationCtx | ActionCtx,
+    args: { limit?: number } = {},
+  ): Promise<AgentPhoneSubAccount[]> {
+    return await ctx.runQuery(this.componentApi.subAccounts.list, {
+      scope: this.scope,
+      ...args,
+    });
+  }
+
+  async getLocalSubAccount(
+    ctx: QueryCtx | MutationCtx | ActionCtx,
+    args: { key: string } | { subAccountId: string },
+  ): Promise<AgentPhoneSubAccount | null> {
+    return await ctx.runQuery(this.componentApi.subAccounts.get, {
+      scope: this.scope,
+      ...args,
     });
   }
 
@@ -1400,6 +1610,18 @@ export class AgentPhone {
     return testMode ? "agentphone_test_mode" : this.apiKey;
   }
 
+  /**
+   * Sub-account management belongs to the master account: AgentPhone allows a
+   * single level of nesting, and a sub-account cannot see or create others.
+   */
+  private assertMasterAccount(method: string) {
+    if (this.subAccountId) {
+      throw new Error(
+        `${method} is a master-account operation, but this client is bound to sub-account ${this.subAccountId}. Call it on the master client that created the sub-account.`,
+      );
+    }
+  }
+
   private get syncConnection() {
     return {
       token: this.apiKey,
@@ -1442,15 +1664,18 @@ export class AgentPhone {
   }
 
   /**
-   * Whether a webhook query scope belongs to this client: its own scope, or one
-   * of the agent scopes `configureAgentWebhook` derives from it.
+   * Whether a webhook query scope belongs to this client: its own scope, or any
+   * scope derived from it by `forSubAccount` or `configureAgentWebhook`.
    */
   private ownsScope(scope: string) {
-    const agentPrefix = `${this.scope}:agent:`;
-    return (
-      scope === this.scope ||
-      (scope.startsWith(agentPrefix) && scope.length > agentPrefix.length)
-    );
+    let candidate: string | null = scope;
+    while (candidate !== null) {
+      if (candidate === this.scope) {
+        return true;
+      }
+      candidate = parentScope(candidate);
+    }
+    return false;
   }
 }
 
@@ -1654,6 +1879,21 @@ function isDeliveryStatus(value: string): value is DeliveryStatus {
     "dead_letter",
     "ignored",
   ].includes(value);
+}
+
+/**
+ * The scope a derived scope was built from, or null when it is already a base
+ * scope. Derived segments are appended by `forSubAccount` (`:sub:<id>`) and
+ * `configureAgentWebhook` (`:agent:<id>`), outermost last.
+ */
+function parentScope(scope: string): string | null {
+  for (const marker of [":agent:", ":sub:"]) {
+    const index = scope.lastIndexOf(marker);
+    if (index > 0 && scope.length > index + marker.length) {
+      return scope.slice(0, index);
+    }
+  }
+  return null;
 }
 
 function normalizePrefix(value: string) {

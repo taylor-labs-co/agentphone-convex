@@ -111,21 +111,23 @@ This guide walks you through adding `agentphone-convex` to an existing Convex pr
     ```ts convex/agentphone.ts
     import { v } from "convex/values";
     import { internalMutation } from "./_generated/server.js";
-    import { eventValidator, voiceResponseValidator } from "agentphone-convex";
+    import { eventCallbackArgs, voiceResponseValidator } from "agentphone-convex";
     import { internal } from "./_generated/api.js";
     import { agentphone } from "./agentphone.js";
 
     agentphone.incomingEventCallback = internal.agentphone.handleEvent;
 
     export const handleEvent = internalMutation({
-      args: { event: eventValidator },
+      args: eventCallbackArgs,
       returns: v.union(voiceResponseValidator, v.null()),
-      handler: async (_ctx, { event }) => {
-        console.log("AgentPhone event", event.event, event.data);
+      handler: async (_ctx, { event, scope }) => {
+        console.log("AgentPhone event", scope, event.event, event.data);
         return null;
       },
     });
     ```
+
+    `eventCallbackArgs` declares the `{ event, scope }` arguments the component dispatches. `scope` tells the handler which tenant the delivery belongs to.
 
     Voice events (`channel === "voice"`) run **synchronously** in the webhook transaction so you can return a `VoiceWebhookResponse` (e.g. `{ text: "One moment." }`) directly to AgentPhone. Non-voice callbacks run **asynchronously** and are retried with exponential backoff before becoming a dead letter.
 

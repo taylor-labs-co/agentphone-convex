@@ -60,21 +60,21 @@ Use `configureAgentWebhook(ctx, { agentId, contextLimit, timeout })` to register
 
 ### Set the event callback
 
-Assign an `internalMutation` reference to `agentphone.incomingEventCallback`. The component calls this mutation for every verified event. For voice events, return a `VoiceWebhookResponse`; return `null` for all other events.
+Assign an `internalMutation` reference to `agentphone.incomingEventCallback`. The component calls this mutation for every verified event with the event and the scope it arrived on. For voice events, return a `VoiceWebhookResponse`; return `null` for all other events.
 
 ```ts
 import { v } from "convex/values";
 import { internalMutation } from "./_generated/server.js";
-import { eventValidator, voiceResponseValidator } from "agentphone-convex";
+import { eventCallbackArgs, voiceResponseValidator } from "agentphone-convex";
 import { internal } from "./_generated/api.js";
 import { agentphone } from "./agentphone.js";
 
 agentphone.incomingEventCallback = internal.agentphone.handleEvent;
 
 export const handleEvent = internalMutation({
-  args: { event: eventValidator },
+  args: eventCallbackArgs,
   returns: v.union(voiceResponseValidator, v.null()),
-  handler: async (_ctx, { event }) => {
+  handler: async (_ctx, { event, scope }) => {
     if (event.event === "agent.message" && event.channel === "voice") {
       return { text: "Let me check that for you." };
     }
@@ -82,6 +82,8 @@ export const handleEvent = internalMutation({
   },
 });
 ```
+
+`eventCallbackArgs` is `{ event, scope }`. `scope` identifies the tenant a delivery belongs to, so a single handler can serve every scope a deployment hosts — see [Multi-Tenant SaaS](/guides/multi-tenant).
 
 </Steps>
 

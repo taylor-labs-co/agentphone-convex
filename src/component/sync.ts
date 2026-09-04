@@ -22,6 +22,28 @@ const syncResult = v.object({
 
 type SyncOutput = { synced: number; response: unknown };
 
+/**
+ * Reconcile the sub-account registry with AgentPhone. Sub-accounts belong to
+ * the master account, so this never sends a sub-account header.
+ */
+export const subAccounts = action({
+  args: {
+    token: v.string(),
+    scope: v.string(),
+    baseUrl: v.optional(v.string()),
+    ...paginationArgs,
+  },
+  returns: syncResult,
+  handler: async (ctx, args): Promise<SyncOutput> => {
+    const response = await get(args, "sub-accounts", pagination(args));
+    const synced: number = await ctx.runMutation(
+      internal.subAccounts.upsertFromResponse,
+      { scope: args.scope, response },
+    );
+    return { synced, response };
+  },
+});
+
 export const agents = action({
   args: { ...connectionArgs, ...paginationArgs },
   returns: syncResult,

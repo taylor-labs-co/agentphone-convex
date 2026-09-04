@@ -56,7 +56,7 @@ export const agentphone = new AgentPhone(components.agentphone, {
 
 ## The component boundary
 
-The component's internal tables — `agents`, `numbers`, `conversations`, `messages`, `calls`, `callTranscripts`, `callRecordings`, `events`, `webhookDeliveries`, and `outboundRequests` — exist in an isolated namespace. Your application's own tables cannot read or write them directly.
+The component's internal tables — `subAccounts`, `agents`, `numbers`, `conversations`, `messages`, `calls`, `callTranscripts`, `callRecordings`, `events`, `webhookDeliveries`, and `outboundRequests` — exist in an isolated namespace. Your application's own tables cannot read or write them directly.
 
 All access to component state flows through the `AgentPhone` client class. For example, you never query the `messages` table directly with `ctx.db.query("messages")`; instead you call `agentphone.listLocalMessagesByConversation(ctx, { conversationId })` from within a Convex query or mutation. This indirection is intentional — it means the component can change its internal schema without affecting your application code.
 
@@ -71,6 +71,7 @@ All access to component state flows through the `AgentPhone` client class. For e
 | User authentication and authorization | ✅ | ❌ |
 | Business logic and application tables | ✅ | ❌ |
 | AgentPhone resource mirrors | ❌ | ✅ |
+| Tenant-to-sub-account registry and provisioning claims | ❌ | ✅ |
 | Webhook verification and delivery | ❌ | ✅ |
 | Outbound queue and retry logic | ❌ | ✅ |
 | Event history log | ❌ | ✅ |

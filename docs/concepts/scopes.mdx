@@ -41,6 +41,21 @@ This guarantees that all webhook deliveries, mirrored resources, event history, 
   Use a value that is already stable and unique in your data model — a database ID or an external workspace identifier — rather than something derived from user input at runtime.
 </Tip>
 
+## Sub-account scopes
+
+When a deployment serves tenants through AgentPhone sub-accounts, let `forSubAccount` derive the scope instead of inventing one:
+
+```
+"<scope>:sub:<subAccountId>"
+```
+
+```ts
+const tenant = agentphone.forSubAccount(subAccountId);
+tenant.scope; // "app:sub:sub_123"
+```
+
+The derived client stores everything under that scope and sends every AgentPhone request with the sub-account header, so the two isolation boundaries — Convex records and the AgentPhone account — always agree. Webhook callbacks receive the scope they arrived on, which is how one handler serves every tenant. See [Multi-Tenant SaaS](/guides/multi-tenant).
+
 ## Agent scopes
 
 When you configure a per-agent webhook override with `configureAgentWebhook`, the component stores the signing secret under a derived agent scope rather than the base scope:
@@ -51,7 +66,7 @@ When you configure a per-agent webhook override with `configureAgentWebhook`, th
 
 For example, if your base scope is `"acme"` and you call `configureAgentWebhook(ctx, { agentId: "agt_123" })`, the secret is stored under `"acme:agent:agt_123"`. Incoming webhook requests addressed to that agent scope verify against this dedicated secret rather than the project-level one.
 
-You do not need to manage agent scopes manually. The client's `webhookUrl()` helper constructs the correct URL with the right scope query parameter, and the webhook route resolves the scope from the incoming request automatically.
+You do not need to manage agent scopes manually. The client's `webhookUrl()` helper constructs the correct URL with the right scope query parameter, and the webhook route resolves the scope from the incoming request automatically. Derived scopes nest: a per-agent override on a tenant client is stored under `"<scope>:sub:<subAccountId>:agent:<agentId>"`, and the webhook route accepts any scope derived from the client it was registered on.
 
 ## The authorization boundary
 

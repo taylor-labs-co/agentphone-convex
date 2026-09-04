@@ -1,7 +1,7 @@
 {
   "name": "agentphone-convex",
   "description": "A production-ready Convex component for AgentPhone messaging, calls, reactive resources, durable outbound work, and webhooks.",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "license": "MIT",
   "private": false,
   "keywords": [
