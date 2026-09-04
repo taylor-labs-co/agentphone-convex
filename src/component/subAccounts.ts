@@ -149,7 +149,7 @@ export const create = action({
     );
     if (!finished.bound) {
       throw new Error(
-        `AgentPhone created sub-account ${finished.record.subAccountId} but nothing binds it to a tenant key. It is recorded without a key: bind it with adoptSubAccount or delete it with deleteSubAccount.`,
+        `AgentPhone created sub-account ${finished.record.subAccountId} but nothing binds it to key ${args.key}. It is recorded without a key: bind it with adoptSubAccount or delete it with deleteSubAccount.`,
       );
     }
     return finished.record;
@@ -380,7 +380,12 @@ export const finishClaim = internalMutation({
         ...(claimed.key && { key: claimed.key }),
         ...(name && { name }),
       });
-      return { bound: claimed.key !== undefined, record };
+      // Keyless creates succeed without a tenant key; keyed ones must keep theirs
+      // (including when a mid-flight adopt already attached one).
+      return {
+        bound: claimed.key === undefined || record.key === claimed.key,
+        record,
+      };
     }
 
     const key = args.key;
@@ -495,7 +500,8 @@ export const deleteRecord = internalMutation({
 
 /**
  * Write the one registry entry that describes a sub-account, preferring the
- * claim that started it, then its tenant key, then its AgentPhone id.
+ * claim that started it, then its tenant key, then its AgentPhone id — except
+ * a keyless claim never displaces an already-keyed active binding for that id.
  *
  * A key and a sub-account id each name at most one entry in a scope, and this
  * never rewrites a binding that already exists: an entry still waiting for its
@@ -520,7 +526,17 @@ async function upsertActive(
     : null;
   const byKey = args.key ? await findByKey(ctx, args.scope, args.key) : null;
   const byId = await findBySubAccountId(ctx, args.scope, args.subAccountId);
-  const target = claimed ?? byKey ?? byId;
+  // A late keyless finish must not delete a tenant binding that adopted this
+  // sub-account while the claim was in flight — keep the keyed row and drop
+  // the claim instead.
+  const target =
+    claimed &&
+    claimed.key === undefined &&
+    args.key === undefined &&
+    byId?.key !== undefined &&
+    byId.status === "active"
+      ? byId
+      : (claimed ?? byKey ?? byId);
 
   if (target?.subAccountId && target.subAccountId !== args.subAccountId) {
     throw new Error(
@@ -536,11 +552,6 @@ async function upsertActive(
       `Sub-account ${args.subAccountId} in scope ${args.scope} already belongs to key ${byId.key}. Release that entry before binding the sub-account to ${args.key}.`,
     );
   }
-  // A keyless entry for the same sub-account describes what is now being
-  // recorded under a key, so it collapses into the target.
-  if (byId && byId._id !== target?._id) {
-    await ctx.db.delete("subAccounts", byId._id);
-  }
 
   const now = Date.now();
   const value = stripUndefined({
@@ -553,6 +564,18 @@ async function upsertActive(
     syncedAt: now,
     updatedAt: now,
   });
+
+  // Collapse every other row that described this claim, key, or id into the
+  // chosen target so the registry keeps a single entry per sub-account.
+  const collapsed = new Set<string>();
+  for (const row of [claimed, byKey, byId]) {
+    if (!row || row._id === target?._id || collapsed.has(row._id)) {
+      continue;
+    }
+    collapsed.add(row._id);
+    await ctx.db.delete("subAccounts", row._id);
+  }
+
   if (target) {
     await ctx.db.replace("subAccounts", target._id, value);
   } else {

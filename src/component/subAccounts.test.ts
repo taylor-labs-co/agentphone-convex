@@ -290,6 +290,49 @@ describe("sub-account provisioning", () => {
     });
   });
 
+  test("preserves an adopted tenant binding when a keyless create finishes late", async () => {
+    const testConvex = initConvexTest();
+    const claimed = await testConvex.mutation(internal.subAccounts.claim, {
+      scope: "master",
+      name: "Acme",
+    });
+    if (claimed.kind !== "claimed") {
+      throw new Error("expected a fresh claim");
+    }
+    // The sub-account is adopted under a tenant while the keyless create is
+    // still waiting on AgentPhone.
+    await testConvex.mutation(api.subAccounts.adopt, {
+      scope: "master",
+      key: "tenant_1",
+      subAccountId: "sub_123",
+      name: "Acme",
+    });
+
+    const finished = await testConvex.mutation(internal.subAccounts.finishClaim, {
+      scope: "master",
+      claimId: claimed.claimId,
+      response: { id: "sub_123", name: "Acme renamed" },
+    });
+    expect(finished).toMatchObject({
+      bound: true,
+      record: {
+        key: "tenant_1",
+        subAccountId: "sub_123",
+        name: "Acme renamed",
+        status: "active",
+      },
+    });
+    expect(
+      await testConvex.query(api.subAccounts.list, { scope: "master" }),
+    ).toHaveLength(1);
+    expect(
+      await testConvex.query(api.subAccounts.get, {
+        scope: "master",
+        key: "tenant_1",
+      }),
+    ).toMatchObject({ subAccountId: "sub_123", key: "tenant_1" });
+  });
+
   test("never reassigns a key or sub-account that is already bound", async () => {
     const testConvex = initConvexTest();
     await testConvex.mutation(api.subAccounts.adopt, {
