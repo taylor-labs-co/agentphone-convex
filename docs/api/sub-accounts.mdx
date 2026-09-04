@@ -223,10 +223,11 @@ const released = await agentphone.releaseSubAccountClaim(ctx, { key: tenantId })
 <Note>
   A `provisioning` claim is leased for five minutes and cannot be released while
   the lease holds, because the `createSubAccount` call that took it may still be
-  waiting on AgentPhone. If the lease lapses and the claim is released while that
-  call is still in flight, a late AgentPhone response still binds the tenant key
-  so a retry cannot create a second sub-account. Claims that a create explicitly
-  could not settle are marked `unresolved` and are releasable right away.
+  waiting on AgentPhone. After the lease lapses, the first release demotes the
+  claim to `unresolved` and returns `false` so a late AgentPhone response can
+  still finish against it; call `releaseSubAccountClaim` again to free the key.
+  Claims that a create explicitly could not settle are marked `unresolved` and
+  are releasable right away.
 </Note>
 
 ---

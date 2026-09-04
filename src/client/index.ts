@@ -445,9 +445,10 @@ export class AgentPhone {
 
   /**
    * Drop an unsettled provisioning claim so its key can be provisioned again.
-   * Returns false when the key has no claim or already names a sub-account, and
-   * throws while a claim is still live, since the `createSubAccount` call
-   * holding it may be waiting on AgentPhone.
+   * Returns false when the key has no claim or already names a sub-account.
+   * Throws while a claim is still live. An expired provisioning claim is
+   * demoted to unresolved on the first release (returns false) so a late
+   * create can still finish; call again to free the key.
    */
   async releaseSubAccountClaim(
     ctx: MutationCtx | ActionCtx,

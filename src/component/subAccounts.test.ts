@@ -114,12 +114,52 @@ describe("sub-account provisioning", () => {
     ).toMatchObject({ status: "provisioning" });
   });
 
-  test("binds a late AgentPhone response even if the claim lease lapsed", async () => {
+  test("demotes an expired provisioning claim instead of deleting it", async () => {
     vi.useFakeTimers();
     const testConvex = initConvexTest();
-    // The claim outlives its lease and is released while AgentPhone answers.
-    // The create must still bind the tenant key so a retry cannot provision a
-    // second provider account for the same key.
+    await testConvex.mutation(internal.subAccounts.claim, {
+      scope: "master",
+      name: "Acme",
+      key: "tenant_1",
+    });
+    vi.advanceTimersByTime(10 * 60 * 1000);
+
+    // First release demotes; the key stays reserved until a second release.
+    expect(
+      await testConvex.mutation(api.subAccounts.releaseClaimByKey, {
+        scope: "master",
+        key: "tenant_1",
+      }),
+    ).toBe(false);
+    expect(
+      await testConvex.query(api.subAccounts.get, {
+        scope: "master",
+        key: "tenant_1",
+      }),
+    ).toMatchObject({
+      status: "unresolved",
+      error: "Provisioning claim lease expired without a result",
+    });
+
+    expect(
+      await testConvex.mutation(api.subAccounts.releaseClaimByKey, {
+        scope: "master",
+        key: "tenant_1",
+      }),
+    ).toBe(true);
+    expect(
+      await testConvex.query(api.subAccounts.get, {
+        scope: "master",
+        key: "tenant_1",
+      }),
+    ).toBeNull();
+  });
+
+  test("finishes against the originating claim after an expired lease demotion", async () => {
+    vi.useFakeTimers();
+    const testConvex = initConvexTest();
+    // Expiring the lease and asking to release demotes the claim; the create
+    // that still holds claimId must bind the tenant when AgentPhone answers.
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => {
@@ -129,7 +169,7 @@ describe("sub-account provisioning", () => {
             scope: "master",
             key: "tenant_1",
           }),
-        ).toBe(true);
+        ).toBe(false);
         return Response.json({ id: "sub_123", name: "Acme" });
       }),
     );
@@ -145,20 +185,109 @@ describe("sub-account provisioning", () => {
       subAccountId: "sub_123",
       status: "active",
     });
+    expect(
+      await testConvex.query(api.subAccounts.list, { scope: "master" }),
+    ).toHaveLength(1);
+  });
 
-    const fetchMock = createResponse("sub_other", "Acme");
-    vi.stubGlobal("fetch", fetchMock);
-    const again = await testConvex.action(api.subAccounts.create, {
-      token: "test_token",
+  test("late completion does not consume a replacement claim for the same key", async () => {
+    const testConvex = initConvexTest();
+    const original = await testConvex.mutation(internal.subAccounts.claim, {
       scope: "master",
       name: "Acme",
       key: "tenant_1",
     });
-    expect(again).toEqual(created);
-    expect(fetchMock).not.toHaveBeenCalled();
+    if (original.kind !== "claimed") {
+      throw new Error("expected a fresh claim");
+    }
+    // Simulate an operator freeing the key and starting a replacement create.
+    await testConvex.mutation(internal.subAccounts.releaseClaim, {
+      claimId: original.claimId,
+    });
+    const replacement = await testConvex.mutation(internal.subAccounts.claim, {
+      scope: "master",
+      name: "Acme",
+      key: "tenant_1",
+    });
+    if (replacement.kind !== "claimed") {
+      throw new Error("expected a replacement claim");
+    }
+
+    const lateOriginal = await testConvex.mutation(
+      internal.subAccounts.finishClaim,
+      {
+        scope: "master",
+        claimId: original.claimId,
+        key: "tenant_1",
+        response: { id: "sub_original", name: "Acme" },
+      },
+    );
+    expect(lateOriginal.bound).toBe(false);
+    expect(lateOriginal.record).toMatchObject({
+      subAccountId: "sub_original",
+      status: "active",
+    });
+    expect(lateOriginal.record.key).toBeUndefined();
+    // The replacement claim is still waiting for its own AgentPhone response.
+    expect(
+      await testConvex.query(api.subAccounts.get, {
+        scope: "master",
+        key: "tenant_1",
+      }),
+    ).toMatchObject({
+      status: "provisioning",
+    });
+
+    const replacementDone = await testConvex.mutation(
+      internal.subAccounts.finishClaim,
+      {
+        scope: "master",
+        claimId: replacement.claimId,
+        key: "tenant_1",
+        response: { id: "sub_replacement", name: "Acme" },
+      },
+    );
+    expect(replacementDone).toMatchObject({
+      bound: true,
+      record: {
+        key: "tenant_1",
+        subAccountId: "sub_replacement",
+        status: "active",
+      },
+    });
     expect(
       await testConvex.query(api.subAccounts.list, { scope: "master" }),
-    ).toHaveLength(1);
+    ).toHaveLength(2);
+  });
+
+  test("binds a vacant key when a released claim finishes with no replacement", async () => {
+    const testConvex = initConvexTest();
+    const claimed = await testConvex.mutation(internal.subAccounts.claim, {
+      scope: "master",
+      name: "Acme",
+      key: "tenant_1",
+    });
+    if (claimed.kind !== "claimed") {
+      throw new Error("expected a fresh claim");
+    }
+    await testConvex.mutation(internal.subAccounts.releaseClaim, {
+      claimId: claimed.claimId,
+    });
+
+    const finished = await testConvex.mutation(internal.subAccounts.finishClaim, {
+      scope: "master",
+      claimId: claimed.claimId,
+      key: "tenant_1",
+      response: { id: "sub_123", name: "Acme" },
+    });
+    expect(finished).toMatchObject({
+      bound: true,
+      record: {
+        key: "tenant_1",
+        subAccountId: "sub_123",
+        status: "active",
+      },
+    });
   });
 
   test("never reassigns a key or sub-account that is already bound", async () => {

@@ -167,9 +167,9 @@ See [Authorization](/guides/authorization) for the JWT-claim helper and when to 
     `syncSubAccounts`, then either `adoptSubAccount` (AgentPhone did create it)
     or `releaseSubAccountClaim` (it did not). Claims are leased for five
     minutes, so a release cannot cut in front of a create that is still within
-    its lease. If a claim is released after the lease lapses while AgentPhone is
-    still answering, the late response still binds the tenant key so a retry
-    cannot provision a second sub-account.
+    its lease. After the lease lapses, the first release demotes the claim to
+    `unresolved` instead of deleting it, so a late AgentPhone response can still
+    finish; a second release frees the key for a new create.
   </Accordion>
   <Accordion title="Offboarding a tenant">
     `deleteSubAccount` deletes the sub-account at AgentPhone and drops its

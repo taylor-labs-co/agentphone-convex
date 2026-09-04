@@ -22,8 +22,10 @@ export type ProvisionedSubAccount = Infer<
 /**
  * How long a `provisioning` claim is treated as live. Within the lease the
  * create that took it may still be waiting on AgentPhone, so the claim is
- * neither reclaimed nor released. A create that ends without learning the
- * outcome marks its claim `unresolved` instead of waiting out the lease.
+ * neither reclaimed nor released. After the lease lapses a release demotes the
+ * claim to `unresolved` instead of deleting it, so a late response can still
+ * finish against the same row. A create that ends without learning the outcome
+ * marks its claim `unresolved` instead of waiting out the lease.
  */
 const CLAIM_LEASE_MS = 5 * 60 * 1000;
 
@@ -235,10 +237,11 @@ export const adopt = mutation({
 /**
  * Drop an unsettled provisioning claim so the key can be provisioned again.
  * Live claims are refused so a release cannot pull the ledger out from under a
- * create that is still waiting on AgentPhone. A create that outlasts its lease
- * can still finish safely: `finishClaim` recovers the tenant key even if this
- * mutation deleted the claim row. Active entries are never released — delete
- * those with `remove`.
+ * create that is still waiting on AgentPhone. After the lease lapses a
+ * `provisioning` claim is demoted to `unresolved` and this returns `false`, so
+ * a late AgentPhone response can still finish against the same claim row; a
+ * second release then frees the key. Active entries are never released —
+ * delete those with `remove`.
  */
 export const releaseClaimByKey = mutation({
   args: { scope: v.string(), key: v.string() },
@@ -248,11 +251,23 @@ export const releaseClaimByKey = mutation({
     if (!row || row.status === "active") {
       return false;
     }
-    const remainingMs = row.updatedAt + CLAIM_LEASE_MS - Date.now();
-    if (row.status === "provisioning" && remainingMs > 0) {
-      throw new Error(
-        `The provisioning claim for key ${args.key} is still live: a createSubAccount call may be waiting on AgentPhone. It becomes releasable in ${Math.ceil(remainingMs / 1000)}s if that call never reports back.`,
-      );
+    if (row.status === "provisioning") {
+      const remainingMs = row.updatedAt + CLAIM_LEASE_MS - Date.now();
+      if (remainingMs > 0) {
+        throw new Error(
+          `The provisioning claim for key ${args.key} is still live: a createSubAccount call may be waiting on AgentPhone. It becomes releasable in ${Math.ceil(remainingMs / 1000)}s if that call never reports back.`,
+        );
+      }
+      // Demote rather than delete: the originating create may still be awaiting
+      // AgentPhone and needs this claimId to bind the tenant when it returns.
+      // Return false (key not freed) — throwing would roll the demotion back.
+      await ctx.db.patch("subAccounts", row._id, {
+        status: "unresolved",
+        error:
+          row.error ?? "Provisioning claim lease expired without a result",
+        updatedAt: Date.now(),
+      });
+      return false;
     }
     await ctx.db.delete("subAccounts", row._id);
     return true;
@@ -352,16 +367,43 @@ export const finishClaim = internalMutation({
       );
     }
     const name = asString(payload.name) ?? claimed?.name;
-    // Prefer the claim row's key, but fall back to the key the create was
-    // asked for. A claim can disappear after its lease if an operator
-    // released it while AgentPhone was still answering; recovering by key
-    // keeps the tenant binding and stops a retry from provisioning twice.
-    const key = claimed?.key ?? args.key;
+
+    // Completion stays tied to the claim that started it. A released claim can
+    // still bind a vacant tenant key, but must not replace a newer claim or
+    // binding that now holds that key — that row belongs to a different create.
+    if (claimed) {
+      const record = await upsertActive(ctx, {
+        scope: args.scope,
+        subAccountId,
+        payload: args.response,
+        claimId: args.claimId,
+        ...(claimed.key && { key: claimed.key }),
+        ...(name && { name }),
+      });
+      return { bound: claimed.key !== undefined, record };
+    }
+
+    const key = args.key;
+    if (key) {
+      const byKey = await findByKey(ctx, args.scope, key);
+      if (byKey) {
+        if (byKey.subAccountId === subAccountId && byKey.status === "active") {
+          return { bound: byKey.key === key, record: asProvisioned(byKey) };
+        }
+        const record = await upsertActive(ctx, {
+          scope: args.scope,
+          subAccountId,
+          payload: args.response,
+          ...(name && { name }),
+        });
+        return { bound: false, record };
+      }
+    }
+
     const record = await upsertActive(ctx, {
       scope: args.scope,
       subAccountId,
       payload: args.response,
-      ...(claimed && { claimId: args.claimId }),
       ...(key && { key }),
       ...(name && { name }),
     });
