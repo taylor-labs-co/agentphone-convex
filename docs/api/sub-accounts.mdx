@@ -225,9 +225,11 @@ const released = await agentphone.releaseSubAccountClaim(ctx, { key: tenantId })
   the lease holds, because the `createSubAccount` call that took it may still be
   waiting on AgentPhone. After the lease lapses, the first release demotes the
   claim to `unresolved` and returns `false` so a late AgentPhone response can
-  still finish against it; call `releaseSubAccountClaim` again to free the key.
+  still finish against it. Freeing that lease-demoted claim requires
+  `releaseSubAccountClaim({ key, force: true })` only after you confirm nothing
+  is still in flight — or `adoptSubAccount` if AgentPhone already created one.
   Claims that a create explicitly could not settle are marked `unresolved` and
-  are releasable right away.
+  are releasable without `force`.
 </Note>
 
 ---

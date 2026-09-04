@@ -31,7 +31,8 @@
   Claims are leased, so releasing one cannot cut in front of a create that is
   still waiting on AgentPhone. An expired `provisioning` claim is demoted to
   `unresolved` rather than deleted, so a late AgentPhone response still finishes
-  against the same claim; only a second release frees the key. A late finish
+  against the same claim; freeing a lease-demoted claim requires an explicit
+  `force` release after confirming nothing is still in flight. A late finish
   whose claim was deleted never replaces a newer claim for that key. A registry
   entry's tenant key and sub-account id are never reassigned across an
   existing binding.

@@ -124,7 +124,7 @@ describe("sub-account provisioning", () => {
     });
     vi.advanceTimersByTime(10 * 60 * 1000);
 
-    // First release demotes; the key stays reserved until a second release.
+    // First release demotes; the key stays reserved for a late finish.
     expect(
       await testConvex.mutation(api.subAccounts.releaseClaimByKey, {
         scope: "master",
@@ -141,10 +141,26 @@ describe("sub-account provisioning", () => {
       error: "Provisioning claim lease expired without a result",
     });
 
+    // A second release without force keeps the originating claim reserved.
+    await expect(
+      testConvex.mutation(api.subAccounts.releaseClaimByKey, {
+        scope: "master",
+        key: "tenant_1",
+      }),
+    ).rejects.toThrow("force: true");
+    expect(
+      await testConvex.query(api.subAccounts.get, {
+        scope: "master",
+        key: "tenant_1",
+      }),
+    ).toMatchObject({ status: "unresolved" });
+
+    // Force is the explicit recovery once the operator knows nothing is in flight.
     expect(
       await testConvex.mutation(api.subAccounts.releaseClaimByKey, {
         scope: "master",
         key: "tenant_1",
+        force: true,
       }),
     ).toBe(true);
     expect(

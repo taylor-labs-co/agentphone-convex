@@ -983,7 +983,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
       releaseClaimByKey: FunctionReference<
         "mutation",
         "internal",
-        { key: string; scope: string },
+        { force?: boolean; key: string; scope: string },
         boolean,
         Name
       >;
