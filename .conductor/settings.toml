@@ -1,0 +1,27 @@
+"$schema" = "https://conductor.build/schemas/settings.repo.schema.json"
+
+[scripts]
+# Both scripts bootstrap what they need. Conductor runs them in a
+# non-interactive shell, and a cloud workspace starts from a bare Linux sandbox
+# with no Convex deployment and no Infisical CLI.
+setup = "bash .conductor/setup.sh"
+
+# Each workspace gets its own disposable Convex deployment, and the scripts give
+# it ports out of this workspace's reserved range, so several can run at once.
+run_mode = "concurrent"
+
+# The default is the watcher, not the dev loop: this is a library, so the inner
+# loop is the test suite, and `convex dev` here exists to exercise the component
+# against a real deployment rather than to serve anything.
+[scripts.run.test]
+command = "npm run test:watch"
+default = true
+icon = "test-tube"
+
+[scripts.run.dev]
+command = "bash .conductor/run.sh"
+icon = "play"
+
+[scripts.run.verify]
+command = "npm run verify"
+icon = "circle-check"

@@ -22,6 +22,14 @@ export default [
       },
     },
   },
+  {
+    // Workspace tooling, not shipped code: it runs in Node, not in Convex's
+    // worker runtime, so it needs Node's globals.
+    files: ["scripts/**/*.{js,mjs,cjs}"],
+    languageOptions: {
+      globals: globals.node,
+    },
+  },
   pluginJs.configs.recommended,
   ...tseslint.configs.recommended,
   {
